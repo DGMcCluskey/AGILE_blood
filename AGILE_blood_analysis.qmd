@@ -62,11 +62,24 @@ fs <- read.flowSet(fcs, transformation = F, truncate_max_range = F)
 ```{r}
 all_cols <- colnames(fs)
 all_cols
-fs <- fs[,-c(1,2)]
+fs <- fs[,-c(1,2,31,35)]
 colnames(fs)
 cols <- colnames(fs)
 cols <- as.data.frame(cols)
 #write.csv(cols, file = "Marker.metadata.csv")
 markers <- read.csv("Marker.metadata.csv")
 markers
+```
+
+## setting up sample metadata
+### use the file names as the basis for the sample metadata
+### first add a column to make the sample id (removes excess characters at end of each fcs file name)
+### use separate to add individual metadata features
+### if script run previously then just load it in
+```{r}
+names <- data.frame(fcs)
+sample_df <- names %>% mutate(sample_id = str_sub(fcs, 1, -24))
+sample_df <- separate(sample_df, col = sample_id, into = c("donor", "treatment", "time"), remove = F, sep = "_")
+write.csv(sample_df, file = "sample.metadata.csv")
+samples <- read.csv("sample.metadata.csv")
 ```
