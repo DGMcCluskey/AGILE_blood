@@ -101,3 +101,14 @@ sce <- prepData(x = fs, panel = markers, md = samples, FACS = T, transform = T,
   md_cols = list(file = "fcs", id = "sample_id",
   factors = c("donor", "treatment", "tissue", "time")))
 ```
+
+## assess cofactors
+### check how many cells in experiment to get an idea of computational load
+### assess cofactors - looking for negative peak to be around 0 whilst maintaining a separation from positive peak
+### there is a level of subjectivity
+```{r}
+table(sce$treatment)
+plotExprs(sce, color_by = "donor")
+sce <- sce.custom
+rm(sce.custom)
+```
