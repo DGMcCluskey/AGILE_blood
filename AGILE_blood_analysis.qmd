@@ -1,0 +1,72 @@
+---
+title: "Untitled"
+format: html
+---
+
+### Analysis of the blood data from the AGILE trial
+### analysis is blinded, with treatments named "guinness" and "corona"
+```{r}
+library(CATALYST)
+library(harmony)
+library(cowplot)
+library(flowCore)
+library(scater)
+library(SingleCellExperiment)
+library(viridis)
+library(RColorBrewer)
+library(ggforce)
+library(ggplot2)
+library(ggrepel)
+library(ggsci)
+library(data.table)
+library(emmeans)
+library(dplyr)
+library(tidyr)
+library(ggsignif)
+library(rstatix)
+library(multcomp)
+library(scales)
+library(ggthemes)
+library(slingshot)
+library(ggbeeswarm)
+library(ggbreak)
+library(DescTools)
+library(pak)
+library(gghighlight)
+library(scattermore)
+library(clustree)
+library(gridExtra)
+library(patchwork)
+library(ggbump)
+library(stringr)
+library(grid)
+```
+
+```{r}
+"c:/Users/dan_m/OneDrive - University College London/UCL_Senior_Research_Fellow/AGILE/Blood"
+```
+
+## loads in FCS files and create flowset object
+### list fcs files in folder, choose ones requied and then run read.flowset
+```{r}
+fcs <- list.files(pattern = ".fcs$")
+fcs
+fs <- read.flowSet(fcs, transformation = F, truncate_max_range = F)
+```
+
+
+## setting up flourophore information
+### check columns (fluorophores) and remove any not needed
+### when running for the first time, save the columns into an excel to form the basis of the fluorophore metadata
+### if this has been created before, just load it in
+```{r}
+all_cols <- colnames(fs)
+all_cols
+fs <- fs[,-c(1,2)]
+colnames(fs)
+cols <- colnames(fs)
+cols <- as.data.frame(cols)
+#write.csv(cols, file = "Marker.metadata.csv")
+markers <- read.csv("Marker.metadata.csv")
+markers
+```
