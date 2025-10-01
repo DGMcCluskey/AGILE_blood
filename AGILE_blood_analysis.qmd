@@ -74,12 +74,30 @@ markers
 ## setting up sample metadata
 ### use the file names as the basis for the sample metadata
 ### first add a column to make the sample id (removes excess characters at end of each fcs file name)
-### use separate to add individual metadata features
-### if script run previously then just load it in
+#### more specifically, this drops the last 18 characters (which are the redundant parts of the file name)
+### use separate to add individual metadata features - due to "stained_blood" being in the naame, i tell this to become "drop" (because i'll remove it) and "tissue"
+## if script run previously then just load it in
 ```{r}
 names <- data.frame(fcs)
-sample_df <- names %>% mutate(sample_id = str_sub(fcs, 1, -24))
-sample_df <- separate(sample_df, col = sample_id, into = c("donor", "treatment", "time"), remove = F, sep = "_")
-write.csv(sample_df, file = "sample.metadata.csv")
+sample_df <- names %>% mutate(sample_id = str_sub(fcs, 1, nchar(fcs)-18))
+sample_df <- separate(sample_df, col = sample_id, into = c("treatment", "donor", "drop", "tissue", "time"), remove = F, sep = "_")
+sample_df <- sample_df[, c(-5)]
+#write.csv(sample_df, file = "sample.metadata.csv")
 samples <- read.csv("sample.metadata.csv")
+samples <- samples[-1]
+```
+
+## making the singlecellexperiment object
+### double check flourophore and sample_ids match their respective metadata files
+### use prepdata to make the sce - here cofactors can be set, which are assessed afterwards
+### this step is repeated until final cofactors are decided
+```{r}
+setdiff(colnames(fs), markers$fluorophore)
+setdiff(fcs, samples$fcs)
+
+sce <- prepData(x = fs, panel = markers, md = samples, FACS = T, transform = T, 
+  cofactor = c("AF647-A"=1000,"APC-Cy7-A"=1000,"APC-Fire810-A"=1000,"BUV395-A"=1000,"BUV496-A"=1000,     "BUV563-A"=1000,"BUV737-A"=1000,"BUV805-A"=1000,"BV421-A"=1000,"BV480-A"=1000,"BV605-A"=1000,"BV711-A"=1000,"BV750-A"=1000,"BV785-A"=1000,"FITC-A"=1000,"PE-A"=1000,"PE-Cy5-A"=1000,"PE-Cy7-A"=1000,"PE-Fire810-A"=1000,"R718-A"=1000,"RB545-A"=1000,"RB744-A"=1000,"RB780-A"=1000,"SB645-A"=1000,"SBB580-A"=1000,"SBUV605-A"=1000,"SBV570-A"=1000,"V450-A"=1000,"[RB613]-A"=1000,"[RB705]-A"=1000,"[RY610]-A"=1000), 
+  panel_cols = list(channel = "fluorophore", antigen = "antigen"),
+  md_cols = list(file = "fcs", id = "sample_id",
+  factors = c("donor", "treatment", "tissue", "time")))
 ```
