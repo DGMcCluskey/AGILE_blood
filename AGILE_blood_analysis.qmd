@@ -135,3 +135,24 @@ numbers_after <- table(sce$sample_id)
 table(sce$treatment)
 plotExprs(sce, color_by = "donor")
 ```
+
+## clustering
+## run the clustering and assess elbow plot - this will determine appropriate k number for selecting resolution
+```{r}
+set.seed(61)
+sce <- CATALYST::cluster(sce, features = NULL, xdim = 10, ydim = 10, maxK = 30, verbose = T, seed = 61)
+
+delta <- delta_area(sce)
+delta <- delta$data
+ggplot(delta, aes(x = k, y = y))+geom_point(size = 5)+geom_line(linewidth = 1.5)+
+  theme_classic()+
+  theme(axis.text = element_text(colour = "black", size = 18), 
+        axis.title = element_text(size = 18, colour = "black"))+
+  xlab("K (number of clusters)")+ylab("Relative change in \n area under CDF curve")
+
+```
+
+### create umap
+```{r}
+sce <- runDR(sce, "UMAP", features = NULL)
+```
