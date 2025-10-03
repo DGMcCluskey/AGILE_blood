@@ -102,6 +102,31 @@ sce <- prepData(x = fs, panel = markers, md = samples, FACS = T, transform = T,
   factors = c("donor", "treatment", "tissue", "time")))
 ```
 
+## downsampling
+### there is ~13 million cells, which is far more than necessary and is computationally limiting
+### therefore downsampling to 10% of cells, applyied to each sample individually
+### this function is straight from chatgpt, but seems to work well
+```{r}
+downsample <- function(sce, sample_col = "sample_id", proportion = 0.1, min_cells = 10) {
+  # Get sample labels
+  samples <- colData(sce)[[sample_col]]
+  
+  # For each sample, randomly select proportion of cells
+  selected_cells <- unlist(lapply(unique(samples), function(s) {
+    cells_in_sample <- which(samples == s)
+    n <- max(round(length(cells_in_sample) * proportion), min_cells)  # enforce a minimum
+    n <- min(length(cells_in_sample), n)  # avoid oversampling
+    sample(cells_in_sample, n)
+  }))
+  
+  # Subset the SCE to those cells
+  sce_downsampled <- sce[, selected_cells]
+  return(sce_downsampled)
+}
+numbers_before <- table(sce$sample_id)
+sce <- downsample(sce, sample_col = "sample_id", proportion = 0.1)
+numbers_after <- table(sce$sample_id)
+```
 ## assess cofactors
 ### check how many cells in experiment to get an idea of computational load
 ### assess cofactors - looking for negative peak to be around 0 whilst maintaining a separation from positive peak
@@ -109,6 +134,4 @@ sce <- prepData(x = fs, panel = markers, md = samples, FACS = T, transform = T,
 ```{r}
 table(sce$treatment)
 plotExprs(sce, color_by = "donor")
-sce <- sce.custom
-rm(sce.custom)
 ```
