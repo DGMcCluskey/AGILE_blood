@@ -104,10 +104,10 @@ sce <- prepData(x = fs, panel = markers, md = samples, FACS = T, transform = T,
 
 ## downsampling
 ### there is ~13 million cells, which is far more than necessary and is computationally limiting
-### therefore downsampling to 10% of cells, applyied to each sample individually
+### therefore downsampling to 5% of cells, applied to each sample individually
 ### this function is straight from chatgpt, but seems to work well
 ```{r}
-downsample <- function(sce, sample_col = "sample_id", proportion = 0.1, min_cells = 10) {
+downsample <- function(sce, sample_col = "sample_id", proportion = 0.05, min_cells = 10) {
   # Get sample labels
   samples <- colData(sce)[[sample_col]]
   
@@ -124,7 +124,7 @@ downsample <- function(sce, sample_col = "sample_id", proportion = 0.1, min_cell
   return(sce_downsampled)
 }
 numbers_before <- table(sce$sample_id)
-sce <- downsample(sce, sample_col = "sample_id", proportion = 0.1)
+sce <- downsample(sce, sample_col = "sample_id", proportion = 0.05)
 numbers_after <- table(sce$sample_id)
 ```
 ## assess cofactors
@@ -136,6 +136,18 @@ table(sce$treatment)
 plotExprs(sce, color_by = "donor")
 ```
 
+## Batch correction
+### use the harmony package to apply batch correction - using donor as the correction
+```{r}
+expdata <- sce@assays@data$exprs
+meta <- sce@colData$donor
+expdata <- t(expdata)
+nrow(expdata)
+nrow(meta)
+harmony_output <- HarmonyMatrix(expdata, meta_data = meta, do_pca = F)
+sce@assays@data$uncorrected <- sce@assays@data$exprs
+sce@assays@data$exprs <- t(harmony_output)
+```
 ## clustering
 ## run the clustering and assess elbow plot - this will determine appropriate k number for selecting resolution
 ```{r}
@@ -155,4 +167,47 @@ ggplot(delta, aes(x = k, y = y))+geom_point(size = 5)+geom_line(linewidth = 1.5)
 ### create umap
 ```{r}
 sce <- runDR(sce, "UMAP", features = NULL)
+```
+
+## save/load here
+```{r}
+#saveRDS(sce, file = "agile_blood_clustered.rds", compress = F)
+sce <- readRDS("agile_blood_clustered.rds")
+```
+
+## inspect umap by metadata - this will confirm absence of batch effects and generally view how groups behave
+```{r}
+variables <- c("donor", "treatment", "time")
+umaps <- list()
+for (i in variables) {
+umaps[[i]] <- plotDR(sce, "UMAP", color_by = i)+theme_bw()+
+    geom_scattermore()
+} 
+p <- plot_grid(umaps$donor, umaps$treatment, umaps$time)
+p
+```
+
+## if it looks reasonable (i.e doesn't split by donor, suggesting batche effect) start assessing the resolution (also known as meta or k)
+### here i use the previously generated delta plot to get an idea of what an appropriate k might be - i then also "over-cluster" on purpose
+## i also plot the expression of all markers in the umap. whilst this is computationally intensive and takes a while, it is worth it as it allows us to see if a marker is expressed across clusters or is distinct to one cluster
+
+```{r}
+res <- c("meta7", "meta10", "meta12", "meta15")
+umaps <- list()
+
+for (i in res) {
+umaps[[i]] <- plotDR(sce, "UMAP", color_by = i)+theme_bw()+
+    geom_scattermore()
+} 
+
+p1 <- plot_grid(umaps$meta7, umaps$meta10, umaps$meta12, umaps$meta15)
+p1
+
+ggsave(plot = p1, filename = "umaps_resolution_comparison.png", dpi = 500,
+height = 6, width = 16)
+
+markers.input <- markers$antigen
+p2 <- plotDR(sce, color_by = markers.input)+theme_bw()
+ggsave(plot = p2, filename = "umap_all_markers.png", dpi = 500,
+height = 16, width = 16, bg = "white")
 ```
