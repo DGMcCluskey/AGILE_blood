@@ -96,7 +96,7 @@ setdiff(colnames(fs), markers$fluorophore)
 setdiff(fcs, samples$fcs)
 
 sce <- prepData(x = fs, panel = markers, md = samples, FACS = T, transform = T, 
-  cofactor = c("AF647-A"=1000,"APC-Cy7-A"=1000,"APC-Fire810-A"=1000,"BUV395-A"=1000,"BUV496-A"=1000,     "BUV563-A"=1000,"BUV737-A"=1000,"BUV805-A"=1000,"BV421-A"=1000,"BV480-A"=1000,"BV605-A"=1000,"BV711-A"=1000,"BV750-A"=1000,"BV785-A"=1000,"FITC-A"=1000,"PE-A"=1000,"PE-Cy5-A"=1000,"PE-Cy7-A"=1000,"PE-Fire810-A"=1000,"R718-A"=1000,"RB545-A"=1000,"RB744-A"=1000,"RB780-A"=1000,"SB645-A"=1000,"SBB580-A"=1000,"SBUV605-A"=1000,"SBV570-A"=1000,"V450-A"=1000,"[RB613]-A"=1000,"[RB705]-A"=1000,"[RY610]-A"=1000), 
+  cofactor = c("AF647-A"=1000,"APC-Cy7-A"=2000,"APC-Fire810-A"=1000,"BUV395-A"=1000,"BUV496-A"=2000,"BUV563-A"=700,"BUV737-A"=1000,"BUV805-A"=1000,"BV421-A"=1000,"BV480-A"=2000,"BV605-A"=1000,"BV711-A"=1000,"BV750-A"=1000,"BV785-A"=1000,"FITC-A"=1000,"PE-A"=2000,"PE-Cy5-A"=1000,"PE-Cy7-A"=1000,"PE-Fire810-A"=1000,"R718-A"=1000,"RB545-A"=1000,"RB744-A"=1000,"RB780-A"=1000,"SB645-A"=1000,"SBB580-A"=1000,"SBUV605-A"=1000,"SBV570-A"=1000,"V450-A"=1000,"[RB613]-A"=1000,"[RB705]-A"=1000,"[RY610]-A"=1000), 
   panel_cols = list(channel = "fluorophore", antigen = "antigen"),
   md_cols = list(file = "fcs", id = "sample_id",
   factors = c("donor", "treatment", "tissue", "time")))
@@ -189,10 +189,9 @@ p
 
 ## if it looks reasonable (i.e doesn't split by donor, suggesting batche effect) start assessing the resolution (also known as meta or k)
 ### here i use the previously generated delta plot to get an idea of what an appropriate k might be - i then also "over-cluster" on purpose
-## i also plot the expression of all markers in the umap. whilst this is computationally intensive and takes a while, it is worth it as it allows us to see if a marker is expressed across clusters or is distinct to one cluster
 
 ```{r}
-res <- c("meta7", "meta10", "meta12", "meta15")
+res <- c("meta10", "meta15", "meta20", "meta25")
 umaps <- list()
 
 for (i in res) {
@@ -200,14 +199,25 @@ umaps[[i]] <- plotDR(sce, "UMAP", color_by = i)+theme_bw()+
     geom_scattermore()
 } 
 
-p1 <- plot_grid(umaps$meta7, umaps$meta10, umaps$meta12, umaps$meta15)
+p1 <- plot_grid(umaps$meta10, umaps$meta15, umaps$meta20, umaps$meta25)
 p1
 
 ggsave(plot = p1, filename = "umaps_resolution_comparison.png", dpi = 500,
 height = 6, width = 16)
+```
 
+## i also plot the expression of all markers in the umap. whilst this is computationally intensive and takes a while, it is worth it as it allows us to see if a marker is expressed across clusters or is distinct to one cluster
+```{r}
 markers.input <- markers$antigen
 p2 <- plotDR(sce, color_by = markers.input)+theme_bw()
 ggsave(plot = p2, filename = "umap_all_markers.png", dpi = 500,
 height = 16, width = 16, bg = "white")
+```
+
+## plotting specific k of interest
+```{r}
+p1 <- plotDR(sce, color_by = "meta20")
+p1
+p2 <- plotDR(sce, color_by = "meta20")+facet_wrap(~meta20)
+p2
 ```
