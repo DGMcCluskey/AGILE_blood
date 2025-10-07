@@ -216,8 +216,10 @@ height = 16, width = 16, bg = "white")
 
 ## plotting specific k of interest
 ```{r}
-p1 <- plotDR(sce, color_by = "meta20")
+p1 <- plotDR(sce, color_by = "meta20")+theme_bw()
 p1
-p2 <- plotDR(sce, color_by = "meta20")+facet_wrap(~meta20)
+p2 <- plotDR(sce, color_by = "meta20")+facet_wrap(~meta20)+theme_bw()
 p2
+p3 <- plotExprHeatmap(sce, k = "meta20", by = "cluster_id")
+p3
 ```
