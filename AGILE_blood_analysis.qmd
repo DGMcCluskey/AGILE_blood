@@ -220,6 +220,64 @@ p1 <- plotDR(sce, color_by = "meta20")+theme_bw()
 p1
 p2 <- plotDR(sce, color_by = "meta20")+facet_wrap(~meta20)+theme_bw()
 p2
-p3 <- plotExprHeatmap(sce, k = "meta20", by = "cluster_id")
+p3 <- plotExprHeatmap(sce, k = "meta20", by = "cluster_id", bars = TRUE, perc = TRUE)
 p3
+```
+
+## filtering and annotation
+### the main point at this stage is to get some preliminary labels that can be further assessed
+### first i also remove tiny clusters that have no expression of a distinct phenotype - likely derbis, doublets or cells that didnt stain properly
+### in this case, this is only clusters 8 and 9, which are both < 1% of all cells and lack any distinctive marker expression
+```{r}
+sce <- filterSCE(sce, k = "meta20", cluster_id %in% c("1", "2", "3", "4", "6", "7","10", "11", "12",
+"13", "14", "15", "16", "17", "18", "19", "20"))
+merging.table <- data.frame("original" = c(1,2,3,4,5,6,7,10,11,12,13,14,15,16,17,18,19,20), 
+"labels" = c("neutrophil", "neutrophil", "neutrophil", "classical_mono", "neutrophil", "neutrophil", "NK", "CD4+T", "CD4+T", "T", "CD8+T", "non_classical_mono", "classical_mono", "DC", "DC", "CD4+T","CD8+T","B"))
+
+sce <- mergeClusters(sce, k = "meta20", table = merging.table, id = "labels", overwrite = T)
+
+sce$labels <- cluster_ids(sce, k = "labels")
+```
+## extract data for plotting
+### before full annotation, we will briefly assess if treatment/time affect cluster proportions
+### add chosen k as a metadata column so that this can be used (add more here if required)
+### then we pull out the data and make it into a dataframe, which is then easy to use for plotting
+```{r}
+sce$k20 <- cluster_ids(sce, "meta20")
+
+ex <- assay(sce, "exprs")
+neut.data <- data.frame(t(ex), sample_id = sce$sample_id, donor = sce$donor, 
+                        treatment = sce$treatment, time = sce$time, 
+                        k20 = sce$k20, labels = sce$labels)
+#add umap dimensions
+umap.coords <- data.frame(reducedDim(sce, "UMAP"))
+neut.data$UMAP_1 <- umap.coords$UMAP1
+neut.data$UMAP_2 <- umap.coords$UMAP2
+```
+
+## cluster proportions
+### a few samples have a 4hr time, these will be called 6h here for analysis sake, but acknowledged throughout
+```{r}
+neut.data$time_new <- factor(neut.data$time, levels = c("-72h", "0h", "4h", "6h", "24h", "48h", "72h"),
+labels = c("-72h", "0h", "4h", "4h", "24h", "48h", "72h"))
+proportions <- neut.data %>% group_by(labels, treatment, time_new, donor) %>% dplyr::count(labels, treatment, time_new)
+proportions <- pivot_wider(proportions, names_from = labels, values_from = n)
+proportions[is.na(proportions)] <- 0
+proportions$total = rowSums(proportions[, c(4:12)])
+proportions <- pivot_longer(proportions, names_to = "cluster", values_to = "number", 4:12)
+proportions$prop <- (proportions$number/proportions$total)*100
+p1 <- ggplot(proportions, aes(x = time_new, y = prop, fill = cluster))+geom_col()+theme_bw()+
+  facet_wrap(~treatment, scales = "free_x", ncol = 1)+
+  theme(axis.text = element_text(size = 12, colour = "black"))+theme(strip.text=element_text(size = 14, colour = "black", face = "bold"))
+p1
+ggsave(plot=p1, filename = "cluster_proportions_barplot.png", dpi = 500, height = 14, width = 4)
+
+proportions$cluster <- factor(proportions$cluster, levels = c("CD4+T", "CD8+T", "T","classical_mono", "non_classical_mono", "DC", "B", "NK", "neutrophil"))
+p2 <- ggplot(proportions, aes(x = time_new, y = prop, colour = treatment, group = treatment)) +
+  theme_bw()+
+  geom_point(alpha = 0.5, position = position_jitter(width = 0.1), size = 1)+
+  stat_summary(fun = mean, geom = "point", size = 2.5)+
+  stat_summary(fun = mean, geom = "line", size = 1)+
+  facet_wrap(~cluster, scales = "free_y", ncol = 3)
+p2
 ```
