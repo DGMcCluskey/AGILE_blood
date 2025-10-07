@@ -350,6 +350,16 @@ counts_summary <- cluster_counts %>%
   left_join(total_cells, by = "sample_id")
 
 clusters <- unique(counts_summary$labels)
+
+delta_data <- counts_summary %>%
+  group_by(donor, time_new) %>%
+  mutate(prop = cluster_count / total_count) %>%  # Proportion per cluster
+  group_by(subject, cluster_id) %>%
+  mutate(
+    baseline_prop = prop[time == "0h"],  # or "-72h" if that's your baseline
+    delta = prop - baseline_prop
+  ) %>%
+  ungroup()
 ```
 ## define function to loop glmm over each cluster
 ```{r}
