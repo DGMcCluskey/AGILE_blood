@@ -40,6 +40,10 @@ library(patchwork)
 library(ggbump)
 library(stringr)
 library(grid)
+library(diffcyt)
+library(lme4)
+library(emmeans)
+library(purrr)
 ```
 
 ```{r}
@@ -259,7 +263,7 @@ neut.data$UMAP_2 <- umap.coords$UMAP2
 ### a few samples have a 4hr time, these will be called 6h here for analysis sake, but acknowledged throughout
 ```{r}
 neut.data$time_new <- factor(neut.data$time, levels = c("-72h", "0h", "4h", "6h", "24h", "48h", "72h"),
-labels = c("-72h", "0h", "4h", "4h", "24h", "48h", "72h"))
+labels = c("-72h", "0h", "6h", "6h", "24h", "48h", "72h"))
 proportions <- neut.data %>% group_by(labels, treatment, time_new, donor) %>% dplyr::count(labels, treatment, time_new)
 proportions <- pivot_wider(proportions, names_from = labels, values_from = n)
 proportions[is.na(proportions)] <- 0
@@ -275,9 +279,10 @@ ggsave(plot=p1, filename = "cluster_proportions_barplot.png", dpi = 500, height 
 proportions$cluster <- factor(proportions$cluster, levels = c("CD4+T", "CD8+T", "T","classical_mono", "non_classical_mono", "DC", "B", "NK", "neutrophil"))
 p2 <- ggplot(proportions, aes(x = time_new, y = prop, colour = treatment, group = treatment)) +
   theme_bw()+
+  scale_colour_manual(values=c("mediumseagreen", "darkorchid2"))+
   geom_point(alpha = 0.5, position = position_jitter(width = 0.1), size = 1)+
-  stat_summary(fun = mean, geom = "point", size = 2.5)+
-  stat_summary(fun = mean, geom = "line", size = 1)+
+  stat_summary(fun = median, geom = "point", size = 2.5)+
+  stat_summary(fun = median, geom = "line", size = 1)+
   facet_wrap(~cluster, scales = "free_y", ncol = 3)+
   theme(strip.text=element_text(size=12,colour="black",face="bold"))+
   ylab("% of whole blood")+xlab("Time from ecoli injection")
@@ -301,9 +306,152 @@ pca.res <- prcomp(matrix)
 data <- as.data.frame(pca.res$x)
 data$donor_treatment_time <- rownames(data)
 data <- data %>% separate(donor_treatment_time, into = c("treatment", "time", "donor"), sep = "_")
-data
-p1 <- ggplot(data, aes(x = PC1, y = PC2, colour = treatment, shape = time))+geom_point(size = 3)+theme_bw()+
-  scale_colour_manual(values = c("indianred2", "royalblue"))+
-  scale_shape_manual(values = c(20,15,17,18,21,22,24,23))
+data$time <- factor(data$time, levels = c("-72h", "0h", "4h", "6h", "24h", "48h", "72h"),
+labels = c("-72h", "0h", "6h", "6h", "24h", "48h", "72h"))
+p1 <- ggplot(data, aes(x = PC1, y = PC2, colour = time, shape = treatment))+geom_point(size = 2)+theme_bw()+
+  scale_colour_manual(values = c( "grey50", "black", "indianred2", "darkred", "darkorchid2", "blue"))+
+  scale_shape_manual(values = c(19,21))
 p1
+```
+
+## differential abundance analysis
+### uusing the diffcyt package - built for flow data
+### before running, need to set up design and contrast matrices
+```{r}
+sce$group <- paste0(sce$treatment, "_", sce$time)
+design <- createDesignMatrix(ei(sce), cols_design = "group")
+
+contrast_minus72h <- createContrast(c(
+  "groupcorona_-72h" = 1,
+  "groupguinness_-72h" = -1
+))
+
+contrast_24h <- rep(0, ncol(design))
+names(contrast_24h) <- colnames(design)
+
+contrast_24h["groupcorona_24h"] <- 1
+contrast_24h["groupguinness_24h"] <- -1
+
+res <- diffcyt(sce, clustering_to_use = "labels", analysis_type = "DA", method_DA = "diffcyt-DA-edgeR", design=design, contrast = contrast_24h, verbose = TRUE)
+tbl_DA <- rowData(res$res)
+sce_24h <- sce[, sce$time == "24h"]
+plotDiffHeatmap(sce_24h, tbl_DA, all = TRUE, fdr=0.05)
+```
+
+## set data up for glmm
+```{r}
+cluster_counts <- neut.data %>%
+  group_by(sample_id,donor, labels, treatment, time_new) %>%
+  summarise(cluster_count = n(), .groups = "drop")
+total_cells <- neut.data %>%
+  group_by(sample_id) %>%
+  summarise(total_cells = n(), .groups = "drop")
+counts_summary <- cluster_counts %>%
+  left_join(total_cells, by = "sample_id")
+
+clusters <- unique(counts_summary$labels)
+```
+## define function to loop glmm over each cluster
+```{r}
+analyse_cluster <- function(cluster_name) {
+  dat_clust <- counts_summary %>% filter(labels == cluster_name)
+  
+  model <- tryCatch({
+    glmer(
+      cbind(cluster_count, total_cells - cluster_count) ~ treatment * time_new + (1 | donor),
+      data = dat_clust,
+      family = binomial
+    )
+  }, error = function(e) {
+    message(paste("Model failed for cluster", cluster_name))
+    return(NULL)
+  })
+  
+  if (is.null(model)) return(NULL)
+  
+  emm <- emmeans(model, ~ treatment | time_new, type = "response")
+  contrasts <- contrast(emm, method = "pairwise")
+  list(
+    cluster = cluster_name,
+    model_summary = summary(model),
+    emmeans = emm,
+    contrasts = contrasts
+  )
+}
+```
+
+## run glmm and get results
+```{r}
+results_list <- lapply(clusters, analyse_cluster)
+names(results_list) <- clusters
+
+# Filter out clusters where model failed (if any)
+results_list <- results_list[!sapply(results_list, is.null)]
+
+# Example: access contrasts for the first cluster
+print(results_list[[1]]$contrasts)
+```
+
+
+```{r}
+# Function to get EMMs + contrasts with p-values for plotting
+extract_emm_and_contrasts <- function(cluster_name, results_list) {
+  emm_df <- as.data.frame(results_list[[cluster_name]]$emmeans)
+  contrasts_df <- as.data.frame(results_list[[cluster_name]]$contrasts)
+  
+  # Add cluster ID to both
+  emm_df$cluster_id <- cluster_name
+  contrasts_df$cluster_id <- cluster_name
+  
+  list(emm = emm_df, contrast = contrasts_df)
+}
+
+# Apply to all clusters
+emm_contrast_list <- lapply(names(results_list), extract_emm_and_contrasts, results_list = results_list)
+
+# Combine into data frames
+emm_all <- bind_rows(lapply(emm_contrast_list, `[[`, "emm"))
+contrast_all <- bind_rows(lapply(emm_contrast_list, `[[`, "contrast"))
+```
+```{r}
+# Extract timepoint and treatment comparison from contrast row names
+contrast_all <- contrast_all %>%
+  mutate(
+    sig_label = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+max_prob <- emm_all %>%
+  group_by(cluster_id) %>%
+  summarise(max_y = max(prob, na.rm = TRUE)) %>%
+  mutate(label_y = max_y * 1.1)  # Add 10% buffer
+
+contrast_all <- contrast_all %>%
+  left_join(max_prob, by = "cluster_id")
+```
+```{r}
+ggplot(emm_all, aes(x = time_new, y = prob, colour = treatment, group = treatment)) +
+  geom_line(position = position_dodge(width=0.4)) +
+  geom_point(position = position_dodge(width=0.4)) +
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), width = 0.2,
+  position = position_dodge(width=0.4)) +
+  geom_text(
+    data = contrast_all %>% filter(sig_label != ""),
+    aes(x = time_new, y = label_y, label = sig_label),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  facet_wrap(~cluster_id, scales = "free_y") +
+  labs(
+    title = "Estimated Cluster Proportions Over Time",
+    y = "Estimated Proportion",
+    x = "Timepoint",
+    colour = "Treatment"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+scale_colour_manual(values=c("mediumseagreen", "darkorchid2"))
 ```
