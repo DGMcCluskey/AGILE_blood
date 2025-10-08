@@ -267,7 +267,7 @@ label_data <- neut.data %>%
   group_by(labels) %>%
   summarise(UMAP_1 = median(UMAP_1), UMAP_2 = median(UMAP_2), .groups = "drop")
 
-plot1 <-ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=labels))+geom_point(size = 0.5)+
+plot1 <-ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=labels))+geom_scattermore()+
   theme_half_open()+
   scale_colour_manual(values = c("indianred2", "red", "darkred", "darkorchid2", "orange",
   "steelblue2", "blue", "cyan4", "mediumseagreen"))+
@@ -278,42 +278,39 @@ plot1 <-ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=labels))+geom_point(size 
     theme(legend.position = "none")
 plot1
 
-ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=treatment))+geom_scattermore()+
+plot2 <- ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=treatment))+geom_scattermore()+
   theme_half_open()+
   scale_colour_manual(values = c("mediumseagreen", "darkorchid2"))+
   theme(
-    legend.position = c(0.95, 0.20),
-    legend.justification = c(1, 1),
-    legend.background = element_rect(fill = "white"),
+    legend.position = "right",
     legend.title = element_text(size = 16),
     legend.text = element_text(size = 14)
   )
 
-ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=time))+geom_scattermore()+
+plot3 <- ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=time))+geom_scattermore()+
   theme_half_open()+
   scale_colour_manual(values = c("black", "grey50", "darkred", "red", "darkorchid2", "steelblue2", "blue"))+
   theme(
-    legend.position = c(0.95, 0.40),
-    legend.justification = c(1, 1),
-    legend.background = element_rect(fill = "white"),
+    legend.position = "right",
     legend.title = element_text(size = 16),
     legend.text = element_text(size = 14)
-  )
+  )+guides(colour=guide_legend(ncol=2))
 
 random_palette <- distinctColorPalette(18)
-ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=donor))+geom_scattermore()+
+plot4 <- ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=donor))+geom_scattermore()+
   theme_half_open()+
   scale_colour_manual(values=random_palette)+
   theme(
-    legend.position = c(0.96, 0.30),
-    legend.justification = c(1, 1),
-    legend.background = element_rect(fill = "white"),
+    legend.position = "right",
     legend.title = element_text(size = 16),
-    legend.text = element_text(size = 14)
-  )+guides(colour=guide_legend(ncol=3))
+    legend.text = element_text(size = 10)
+  )+guides(colour=guide_legend(ncol=2))
 
-
+combo <- plot1 + (plot2 / plot3 / plot4)+plot_layout(, ncol = 2,widths = c(3, 1))
+combo
+ggsave(plot=combo,filename="annotated_umaps.png", dpi=500,height=10,width=18,bg="white")
 ```
+
 ## cluster proportions
 ### a few samples have a 4hr time, these will be called 6h here for analysis sake, but acknowledged throughout
 ### before i run differential abundance, i want to just see the proportions of each cluster in total across the dataset
