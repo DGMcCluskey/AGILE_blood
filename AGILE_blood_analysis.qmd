@@ -263,14 +263,15 @@ neut.data$labels <- factor(neut.data$labels, levels =c("CD4+T", "CD8+T", "T", "N
 
 ## annotated umaps and accompanying heatmap
 ```{r}
+cluster_palette <- c("indianred2", "red", "darkred", "darkorchid2", "orange",
+  "steelblue2", "blue", "cyan4", "mediumseagreen")
 label_data <- neut.data %>%
   group_by(labels) %>%
   summarise(UMAP_1 = median(UMAP_1), UMAP_2 = median(UMAP_2), .groups = "drop")
 
 plot1 <-ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=labels))+geom_scattermore()+
   theme_half_open()+
-  scale_colour_manual(values = c("indianred2", "red", "darkred", "darkorchid2", "orange",
-  "steelblue2", "blue", "cyan4", "mediumseagreen"))+
+  scale_colour_manual(values = cluster_palette)+
     geom_label_repel(data=label_data, aes(label=labels, fill = labels), colour = "white",
     size = 5, fontface = "bold", label.size = 1)+
     scale_fill_manual(values = c("indianred2", "red", "darkred", "darkorchid2", "orange",
@@ -317,19 +318,27 @@ ggsave(plot=combo,filename="annotated_umaps.png", dpi=500,height=10,width=18,bg=
 ```{r}
 neut.data$time_new <- factor(neut.data$time, levels = c("-72h", "0h", "4h", "6h", "24h", "48h", "72h"),
 labels = c("-72h", "0h", "6h", "6h", "24h", "48h", "72h"))
-proportions <- neut.data %>% group_by(labels, time_new) %>% dplyr::count(labels,time_new)
+proportions <- neut.data %>% group_by(labels, donor) %>% dplyr::count(labels,donor)
 proportions <- pivot_wider(proportions, names_from = labels, values_from = n)
 proportions[is.na(proportions)] <- 0
 proportions$total = rowSums(proportions[, c(2:10)])
 proportions <- pivot_longer(proportions, names_to = "cluster", values_to = "number", 2:10)
 proportions$prop <- (proportions$number/proportions$total)*100
-p1 <- ggplot(proportions, aes(x = time_new, y = prop, fill = cluster))+
+proportions$cluster <- factor(proportions$cluster, 
+levels =c("CD4+T", "CD8+T", "T", "NK", "B","classical_mono", "non_classical_mono", "DC", "neutrophil"))
+p1 <- ggplot(proportions, aes(x = donor, y = prop, fill = cluster))+
   geom_col()+theme_bw()+
-  theme(axis.text = element_text(size = 12, colour = "black"))+theme(strip.text=element_text(size = 14, colour = "black", face = "bold"))+
-  scale_fill_brewer(palette = "Paired")+
-  scale_y_continuous(expand = c(0,0))
+  theme(axis.text.y = element_text(size = 12, colour = "black"))+
+  theme(axis.text.x = element_text(size = 8, colour = "black", angle =45, hjust=1))+
+  theme(strip.text=element_text(size = 14, colour = "black", face = "bold"))+
+  theme(axis.title=element_text(size=16, colour ="black"))+
+  scale_fill_manual(values = cluster_palette)+
+  scale_y_continuous(expand = c(0,0))+
+  labs(x = "Donor", y = "% of whole blood", fill = NULL)+
+  theme(legend.text = element_text(size = 14))
+
 p1
-ggsave(plot=p1, filename = "cluster_proportions_barplot.png", dpi = 500, height = 14, width = 4)
+ggsave(plot=p1, filename = "cluster_proportions_barplot.png", dpi = 500, height = 12, width = 6)
 ```
 
 ## differential abundance analysis
