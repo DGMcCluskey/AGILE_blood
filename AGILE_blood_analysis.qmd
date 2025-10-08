@@ -40,10 +40,10 @@ library(patchwork)
 library(ggbump)
 library(stringr)
 library(grid)
-library(diffcyt)
 library(lme4)
 library(emmeans)
 library(purrr)
+library(randomcoloR)
 ```
 
 ```{r}
@@ -257,61 +257,82 @@ neut.data <- data.frame(t(ex), sample_id = sce$sample_id, donor = sce$donor,
 umap.coords <- data.frame(reducedDim(sce, "UMAP"))
 neut.data$UMAP_1 <- umap.coords$UMAP1
 neut.data$UMAP_2 <- umap.coords$UMAP2
+neut.data$labels <- factor(neut.data$labels, levels =c("CD4+T", "CD8+T", "T", "NK", "B",
+"classical_mono", "non_classical_mono", "DC", "neutrophil"))
 ```
 
+## annotated umaps and accompanying heatmap
+```{r}
+label_data <- neut.data %>%
+  group_by(labels) %>%
+  summarise(UMAP_1 = median(UMAP_1), UMAP_2 = median(UMAP_2), .groups = "drop")
+
+plot1 <-ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=labels))+geom_point(size = 0.5)+
+  theme_half_open()+
+  scale_colour_manual(values = c("indianred2", "red", "darkred", "darkorchid2", "orange",
+  "steelblue2", "blue", "cyan4", "mediumseagreen"))+
+    geom_label_repel(data=label_data, aes(label=labels, fill = labels), colour = "white",
+    size = 5, fontface = "bold", label.size = 1)+
+    scale_fill_manual(values = c("indianred2", "red", "darkred", "darkorchid2", "orange",
+  "steelblue2", "blue", "cyan4", "mediumseagreen"))+
+    theme(legend.position = "none")
+plot1
+
+ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=treatment))+geom_scattermore()+
+  theme_half_open()+
+  scale_colour_manual(values = c("mediumseagreen", "darkorchid2"))+
+  theme(
+    legend.position = c(0.95, 0.20),
+    legend.justification = c(1, 1),
+    legend.background = element_rect(fill = "white"),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14)
+  )
+
+ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=time))+geom_scattermore()+
+  theme_half_open()+
+  scale_colour_manual(values = c("black", "grey50", "darkred", "red", "darkorchid2", "steelblue2", "blue"))+
+  theme(
+    legend.position = c(0.95, 0.40),
+    legend.justification = c(1, 1),
+    legend.background = element_rect(fill = "white"),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14)
+  )
+
+random_palette <- distinctColorPalette(18)
+ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=donor))+geom_scattermore()+
+  theme_half_open()+
+  scale_colour_manual(values=random_palette)+
+  theme(
+    legend.position = c(0.96, 0.30),
+    legend.justification = c(1, 1),
+    legend.background = element_rect(fill = "white"),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14)
+  )+guides(colour=guide_legend(ncol=3))
+
+
+```
 ## cluster proportions
 ### a few samples have a 4hr time, these will be called 6h here for analysis sake, but acknowledged throughout
+### before i run differential abundance, i want to just see the proportions of each cluster in total across the dataset
 ```{r}
 neut.data$time_new <- factor(neut.data$time, levels = c("-72h", "0h", "4h", "6h", "24h", "48h", "72h"),
 labels = c("-72h", "0h", "6h", "6h", "24h", "48h", "72h"))
-proportions <- neut.data %>% group_by(labels, treatment, time_new, donor) %>% dplyr::count(labels, treatment, time_new)
+proportions <- neut.data %>% group_by(labels, time_new) %>% dplyr::count(labels,time_new)
 proportions <- pivot_wider(proportions, names_from = labels, values_from = n)
 proportions[is.na(proportions)] <- 0
-proportions$total = rowSums(proportions[, c(4:12)])
-proportions <- pivot_longer(proportions, names_to = "cluster", values_to = "number", 4:12)
+proportions$total = rowSums(proportions[, c(2:10)])
+proportions <- pivot_longer(proportions, names_to = "cluster", values_to = "number", 2:10)
 proportions$prop <- (proportions$number/proportions$total)*100
-p1 <- ggplot(proportions, aes(x = time_new, y = prop, fill = cluster))+geom_col()+theme_bw()+
-  facet_wrap(~treatment, scales = "free_x", ncol = 1)+
-  theme(axis.text = element_text(size = 12, colour = "black"))+theme(strip.text=element_text(size = 14, colour = "black", face = "bold"))
+p1 <- ggplot(proportions, aes(x = time_new, y = prop, fill = cluster))+
+  geom_col()+theme_bw()+
+  theme(axis.text = element_text(size = 12, colour = "black"))+theme(strip.text=element_text(size = 14, colour = "black", face = "bold"))+
+  scale_fill_brewer(palette = "Paired")+
+  scale_y_continuous(expand = c(0,0))
 p1
 ggsave(plot=p1, filename = "cluster_proportions_barplot.png", dpi = 500, height = 14, width = 4)
-
-proportions$cluster <- factor(proportions$cluster, levels = c("CD4+T", "CD8+T", "T","classical_mono", "non_classical_mono", "DC", "B", "NK", "neutrophil"))
-p2 <- ggplot(proportions, aes(x = time_new, y = prop, colour = treatment, group = treatment)) +
-  theme_bw()+
-  scale_colour_manual(values=c("mediumseagreen", "darkorchid2"))+
-  geom_point(alpha = 0.5, position = position_jitter(width = 0.1), size = 1)+
-  stat_summary(fun = median, geom = "point", size = 2.5)+
-  stat_summary(fun = median, geom = "line", size = 1)+
-  facet_wrap(~cluster, scales = "free_y", ncol = 3)+
-  theme(strip.text=element_text(size=12,colour="black",face="bold"))+
-  ylab("% of whole blood")+xlab("Time from ecoli injection")
-p2
-```
-
-## PCA
-### can assess if samples cluster seperately based on treatment or time
-### here im getting markers into one column, getting their mean across groups of interest and then saving the metadata info in one name and maing these rownames for the matrix
-```{r}
-#pca at patient level (all clusters)
-matrix <- neut.data[, c(1:35)]
-matrix <- pivot_longer(matrix, names_to = "marker", values_to = "expression", 1:31)
-matrix <- matrix %>% group_by(donor, marker, treatment, time) %>% summarise(mean = mean(expression))
-matrix <- pivot_wider(matrix, names_from = "marker", values_from = "mean")
-matrix$donor_treatment_time <- paste0(matrix$treatment,"_",matrix$time, "_", matrix$donor)
-matrix.names <- matrix$donor_treatment_time
-matrix <- matrix[, -c(1:3,35)]
-rownames(matrix) <- matrix.names
-pca.res <- prcomp(matrix)
-data <- as.data.frame(pca.res$x)
-data$donor_treatment_time <- rownames(data)
-data <- data %>% separate(donor_treatment_time, into = c("treatment", "time", "donor"), sep = "_")
-data$time <- factor(data$time, levels = c("-72h", "0h", "4h", "6h", "24h", "48h", "72h"),
-labels = c("-72h", "0h", "6h", "6h", "24h", "48h", "72h"))
-p1 <- ggplot(data, aes(x = PC1, y = PC2, colour = time, shape = treatment))+geom_point(size = 2)+theme_bw()+
-  scale_colour_manual(values = c( "grey50", "black", "indianred2", "darkred", "darkorchid2", "blue"))+
-  scale_shape_manual(values = c(19,21))
-p1
 ```
 
 ## differential abundance analysis
@@ -456,7 +477,9 @@ plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group
   scale_y_continuous(expand = expansion(mult = c(0.05, 0.15)))+
   theme(axis.text = element_text(size = 12, colour = "black"),
   strip.text = element_text(size = 12, colour = "black", face = "bold"),
-  axis.title = element_text(size = 14, colour = "black"))
+  axis.title = element_text(size = 14, colour = "black"))+ 
+    theme(legend.text = element_text(size = 14),legend.title = element_text(size = 15))+
+  guides(colour = guide_legend(override.aes = list(size = 5)))
 plot1
 ggsave(plot=plot1,filename="relative_change_proportions.png", dpi = 500,
 height = 8, width = 12, bg="white")
