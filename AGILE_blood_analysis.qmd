@@ -315,30 +315,9 @@ p1
 ```
 
 ## differential abundance analysis
-### uusing the diffcyt package - built for flow data
-### before running, need to set up design and contrast matrices
-```{r}
-sce$group <- paste0(sce$treatment, "_", sce$time)
-design <- createDesignMatrix(ei(sce), cols_design = "group")
-
-contrast_minus72h <- createContrast(c(
-  "groupcorona_-72h" = 1,
-  "groupguinness_-72h" = -1
-))
-
-contrast_24h <- rep(0, ncol(design))
-names(contrast_24h) <- colnames(design)
-
-contrast_24h["groupcorona_24h"] <- 1
-contrast_24h["groupguinness_24h"] <- -1
-
-res <- diffcyt(sce, clustering_to_use = "labels", analysis_type = "DA", method_DA = "diffcyt-DA-edgeR", design=design, contrast = contrast_24h, verbose = TRUE)
-tbl_DA <- rowData(res$res)
-sce_24h <- sce[, sce$time == "24h"]
-plotDiffHeatmap(sce_24h, tbl_DA, all = TRUE, fdr=0.05)
-```
-
-## set data up for glmm
+### set data up for mixed-effects model
+### here im getting counts per cluster, total cells per sample, then a summary
+### next i get the "delta" or relative/fold change
 ```{r}
 cluster_counts <- neut.data %>%
   group_by(sample_id,donor, labels, treatment, time_new) %>%
@@ -361,7 +340,10 @@ delta_data <- counts_summary %>%
   ) %>%
   ungroup()
 ```
-## define function to loop glmm over each cluster
+
+## define function to loop the mixed model over each cluster
+### the model is a lmer, accounting for paired samples where possible
+### we then get the estimated means ande constrast results (basicalyy the p values)
 ```{r}
 analyse_cluster <- function(cluster_name) {
   dat_clust <- delta_data %>% filter(labels == cluster_name)
@@ -389,7 +371,7 @@ analyse_cluster <- function(cluster_name) {
 }
 ```
 
-## run glmm and get results
+## run the model and get the results
 ```{r}
 results_list <- lapply(clusters, analyse_cluster)
 names(results_list) <- clusters
@@ -401,7 +383,8 @@ results_list <- results_list[!sapply(results_list, is.null)]
 print(results_list[[1]]$contrasts)
 ```
 
-
+## here we access the results list, pulling out the emmeans and contrasts with a function
+## then combine into usable dataframes
 ```{r}
 # Function to get EMMs + contrasts with p-values for plotting
 extract_emm_and_contrasts <- function(cluster_name, results_list) {
@@ -422,6 +405,10 @@ emm_contrast_list <- lapply(names(results_list), extract_emm_and_contrasts, resu
 emm_all <- bind_rows(lapply(emm_contrast_list, `[[`, "emm"))
 contrast_all <- bind_rows(lapply(emm_contrast_list, `[[`, "contrast"))
 ```
+
+## add a column specifying if a result was significant so that we can use these in the plot
+## add a value that is above the upper confidence interval by a little bit so that the asterisks will sit above them on the plot
+## join these columns back in witht he contrasts_all df
 ```{r}
 # Extract timepoint and treatment comparison from contrast row names
 contrast_all <- contrast_all %>%
@@ -436,14 +423,16 @@ contrast_all <- contrast_all %>%
 
 max_prob <- emm_all %>%
   group_by(cluster_id) %>%
-  summarise(max_y = max(emmean, na.rm = TRUE)) %>%
-  mutate(label_y = max_y * 1.1)  # Add 10% buffer
+  summarise(max_y = max(upper.CL, na.rm = TRUE)) %>%
+  mutate(label_y = max_y +0.05)
 
 contrast_all <- contrast_all %>%
   left_join(max_prob, by = "cluster_id")
 ```
+
+## plot the results and save
 ```{r}
-ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
+plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
   geom_hline(yintercept = 1, linetype = "dashed", colour = "grey50")+
   geom_line(position = position_dodge(width=0.4)) +
   geom_point(position = position_dodge(width=0.4)) +
@@ -453,15 +442,22 @@ ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group = treatm
     data = contrast_all %>% filter(sig_label != ""),
     aes(x = time_new, y = label_y, label = sig_label),
     inherit.aes = FALSE,
-    size = 3
+    size = 7
   ) +
   facet_wrap(~cluster_id, scales = "free_y") +
   labs(
-    title = "Estimated Cluster Proportions Over Time",
-    y = "Estimated Proportion",
+    title = "Relative change of cluster proportions over time",
+    y = "Relative change",
     x = "Timepoint",
     colour = "Treatment"
   ) +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))+scale_colour_manual(values=c("mediumseagreen", "darkorchid2"))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+scale_colour_manual(values=c("mediumseagreen", "darkorchid2"))+ 
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15)))+
+  theme(axis.text = element_text(size = 12, colour = "black"),
+  strip.text = element_text(size = 12, colour = "black", face = "bold"),
+  axis.title = element_text(size = 14, colour = "black"))
+plot1
+ggsave(plot=plot1,filename="relative_change_proportions.png", dpi = 500,
+height = 8, width = 12, bg="white")
 ```
