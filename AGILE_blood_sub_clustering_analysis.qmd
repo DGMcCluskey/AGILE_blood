@@ -116,12 +116,49 @@ ggsave(plot = p2, filename = "umap_all_markers.png", dpi = 500,
 height = 16, width = 16, bg = "white")
 ```
 
-## plotting specific k of interest
+## plotting specific k of interest in multiple ways to QC clusters
 ```{r}
 p1 <- plotDR(sce, color_by = "meta20")+theme_bw()
 p1
 p2 <- plotDR(sce, color_by = "meta20")+facet_wrap(~meta20)+theme_bw()
 p2
-p3 <- plotExprHeatmap(sce, k = "meta20", by = "cluster_id", bars = TRUE, perc = TRUE)
+
+p3 <- plotAbundances(sce, k = "meta20", by = "cluster_id", group_by="donor")
 p3
+
+p4 <- plotExprHeatmap(sce, k = "meta20", by = "cluster_id", bars = TRUE, perc = TRUE)
+p4
+
+combo <- p1+theme(legend.position="none")+p2+p3+theme(legend.position="none")+plot_layout(ncol=3)
+ggsave(combo, filename="subclustering_qc.png", dpi=500, height=10, width = 20)
+```
+
+## filtering
+### there a number of tiny clusters (below 1% of cells, even with neuts removed), suggesting they may be called as a cluster due to high expression of only one marker
+### most of these tiny clusters are also spatially spread throughout the plot
+### i'm confident these are cells that have picked up multiple antibodies, have abnormal expression and are not meaningful
+### i will filter out these clusters
+## made an exception for cluster 10, as this has reasoable foxp3, so might be a (sverely underrepresented) treg population
+```{r}
+sce <- filterSCE(sce, k = "meta20", cluster_id %in% c("1", "3", "4", "6", "8", "9", "10", "11",
+"14", "16", "17", "19"))
+```
+
+## annotation
+### make a heatmap again with final clusters, to best visualise marker split
+```{r}
+p1 <- plotDR(sce, color_by = "meta20")+theme_bw()
+p1
+p2 <- plotExprHeatmap(sce, k = "meta20", by = "cluster_id", bars = TRUE, perc = TRUE)
+p2
+```
+
+### make and apply the labels
+```{r}
+merging.table <- data.frame("original" = c(1,2,3,4,5,6,7,10,11,12,13,14,15,16,17,18,19,20), 
+"labels" = c("neutrophil", "neutrophil", "neutrophil", "classical_mono", "neutrophil", "neutrophil", "NK", "CD4+T", "CD4+T", "T", "CD8+T", "non_classical_mono", "classical_mono", "DC", "DC", "CD4+T","CD8+T","B"))
+
+sce <- mergeClusters(sce, k = "meta20", table = merging.table, id = "labels", overwrite = T)
+
+sce$labels <- cluster_ids(sce, k = "labels")
 ```
