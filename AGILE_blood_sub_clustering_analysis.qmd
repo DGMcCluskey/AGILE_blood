@@ -172,3 +172,105 @@ sce$labels <- cluster_ids(sce, k = "labels")
 saveRDS(sce, file="agile_blood_subclustered_annotated.rds", compress=F)
 sce <- readRDS("agile_blood_subclustered_annotated.rds")
 ```
+
+## extract data for plotting
+### dataframe is more versatile than the singlecellexperiment
+```{r}
+sce$k20 <- cluster_ids(sce, "meta20")
+
+ex <- assay(sce, "exprs")
+neut.data <- data.frame(t(ex), sample_id = sce$sample_id, donor = sce$donor, 
+                        treatment = sce$treatment, time = sce$time, 
+                        k20 = sce$k20, labels = sce$labels)
+#add umap dimensions
+umap.coords <- data.frame(reducedDim(sce, "UMAP"))
+neut.data$UMAP_1 <- umap.coords$UMAP1
+neut.data$UMAP_2 <- umap.coords$UMAP2
+neut.data$labels <- factor(neut.data$labels, levels =c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T", "NK", "B",
+"Classical_mono", "Intermediate_mono", "Non_classical_mono", "DC", "neutrophil"))
+```
+
+## annotated umaps
+```{r}
+cluster_palette <- c("seagreen3", "darkgreen", "indianred2", "red", "darkred", "darkorchid2", "orange",
+  "steelblue2", "blue", "cyan4", "cyan1")
+label_data <- neut.data %>%
+  group_by(labels) %>%
+  summarise(UMAP_1 = median(UMAP_1), UMAP_2 = median(UMAP_2), .groups = "drop")
+
+plot1 <-ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=labels))+geom_scattermore()+
+  theme_half_open()+
+  scale_colour_manual(values = cluster_palette)+
+    geom_label_repel(data=label_data, aes(label=labels, fill = labels), colour = "white",
+    size = 5, fontface = "bold", label.size = 1)+
+    scale_fill_manual(values = cluster_palette)+
+    theme(legend.position = "none")
+plot1
+
+plot2 <- ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=treatment))+geom_scattermore()+
+  theme_half_open()+
+  scale_colour_manual(values = c("mediumseagreen", "darkorchid2"))+
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14)
+  )
+
+plot3 <- ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=time))+geom_scattermore()+
+  theme_half_open()+
+  scale_colour_manual(values = c("black", "grey50", "darkred", "red", "darkorchid2", "steelblue2", "blue"))+
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14)
+  )+guides(colour=guide_legend(ncol=2))
+
+random_palette <- distinctColorPalette(18)
+plot4 <- ggplot(neut.data, aes(x=UMAP_1,y=UMAP_2,colour=donor))+geom_scattermore()+
+  theme_half_open()+
+  scale_colour_manual(values=random_palette)+
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 10)
+  )+guides(colour=guide_legend(ncol=2))
+
+combo <- plot1 + (plot2 / plot3 / plot4)+plot_layout(, ncol = 2,widths = c(3, 1))
+combo
+ggsave(plot=combo,filename="annotated_umaps.png", dpi=500,height=10,width=18,bg="white")
+```
+
+## heatmap and violin plots to accompany annotated umap
+## easiest way to do this is to generate a heatmap through catalysts' own function and then extract and plot this with pheatmap
+### note the subsetting of the "hm" - this is me choosing the markers for the hetamp (e.g. dont need neut markers, or markers that dont distinguish populations)
+```{r}
+markers <- rownames(sce)
+hm <- plotExprHeatmap(sce, features = markers, 
+by = "cluster_id", k = "labels", bars = T, perc = T, scale = "last")
+
+hm <- hm@matrix
+hm <- hm[, c(4,5,6,7,10,16,19,21,22,24,26,30)]
+hm2 <- pheatmap::pheatmap(hm, scale = "none", color = rev(hcl.colors(100, "RdYlBu")), border_color = "black",cluster_cols = T, cluster_rows = T, treeheight_col = 0, treeheight_row=10, cellheight = 20, cellwidth = 20)
+
+ggsave(plot=hm2,filename="key_marker_heatmap.png", dpi=500,height=5,width=8,bg="white")
+
+marker_df <- neut.data[, c(3,4,5,6,10,15,16,19,21,22,24,26,30,37)]
+marker_df <- pivot_longer(marker_df, names_to = "marker", values_to = "expression", cols = 1:13)
+
+p.violin <- ggplot(marker_df, aes(x = labels, y = expression, fill = labels))+geom_violin(scale = "width", trim = T)+
+  facet_grid(rows = vars(marker), scales = "free", switch = "y")+theme_cowplot()+
+  scale_y_continuous(expand = c(0, 0), position="right", labels = function(x)
+    c(rep(x = "", times = length(x)-2), x[length(x) - 1], ""))+
+  theme(legend.position = "none", panel.spacing = unit(0, "lines"),
+        plot.title = element_text(hjust = 0.5),
+        panel.background = element_rect(fill = NA, color = "black"),
+        strip.background = element_blank(),
+        strip.text = element_text(face = "bold"),
+        strip.text.y.left = element_text(angle = 0, size = 14))+
+  theme(axis.text.x = element_text(size = 14, colour = "black", angle = 45, hjust = 1))+
+  xlab(NULL)+
+  scale_fill_manual(values=cluster_palette)
+p.violin
+ggsave(plot=p.violin, filename = "violin_expression.png", dpi = 500,
+height = 14, width = 6, bg = "white")
+```

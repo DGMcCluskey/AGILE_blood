@@ -354,6 +354,8 @@ height = 14, width = 6, bg = "white")
 
 
 ```
+
+
 ## cluster proportions
 ### a few samples have a 4hr time, these will be called 6h here for analysis sake, but acknowledged throughout
 ### before i run differential abundance, i want to just see the proportions of each cluster in total across the dataset
