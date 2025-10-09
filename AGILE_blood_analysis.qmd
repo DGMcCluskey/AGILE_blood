@@ -242,6 +242,13 @@ sce <- mergeClusters(sce, k = "meta20", table = merging.table, id = "labels", ov
 
 sce$labels <- cluster_ids(sce, k = "labels")
 ```
+
+## save annotated object here
+```{r}
+#saveRDS(sce, file="agile_blood_annotated.rds", compress=F)
+sce <- readRDS("agile_blood_annotated.rds")
+```
+
 ## extract data for plotting
 ### before full annotation, we will briefly assess if treatment/time affect cluster proportions
 ### add chosen k as a metadata column so that this can be used (add more here if required)
