@@ -254,8 +254,8 @@ hm2 <- pheatmap::pheatmap(hm, scale = "none", color = rev(hcl.colors(100, "RdYlB
 
 ggsave(plot=hm2,filename="key_marker_heatmap.png", dpi=500,height=5,width=8,bg="white")
 
-marker_df <- neut.data[, c(3,4,5,6,10,15,16,19,21,22,24,26,30,37)]
-marker_df <- pivot_longer(marker_df, names_to = "marker", values_to = "expression", cols = 1:13)
+marker_df <- neut.data[, c(4,5,6,7,10,16,19,21,22,24,26,30,37)]
+marker_df <- pivot_longer(marker_df, names_to = "marker", values_to = "expression", cols = 1:12)
 
 p.violin <- ggplot(marker_df, aes(x = labels, y = expression, fill = labels))+geom_violin(scale = "width", trim = T)+
   facet_grid(rows = vars(marker), scales = "free", switch = "y")+theme_cowplot()+
@@ -273,4 +273,239 @@ p.violin <- ggplot(marker_df, aes(x = labels, y = expression, fill = labels))+ge
 p.violin
 ggsave(plot=p.violin, filename = "violin_expression.png", dpi = 500,
 height = 14, width = 6, bg = "white")
+```
+
+## cluster proportions
+### a few samples have a 4hr time, these will be called 6h here for analysis sake, but acknowledged throughout
+### before i run differential abundance, i want to just see the proportions of each cluster in total across the dataset
+```{r}
+neut.data$time_new <- factor(neut.data$time, levels = c("-72h", "0h", "4h", "6h", "24h", "48h", "72h"),
+labels = c("-72h", "0h", "6h", "6h", "24h", "48h", "72h"))
+proportions <- neut.data %>% group_by(labels, donor) %>% dplyr::count(labels,donor)
+proportions <- pivot_wider(proportions, names_from = labels, values_from = n)
+proportions[is.na(proportions)] <- 0
+proportions$total = rowSums(proportions[, c(2:12)])
+proportions <- pivot_longer(proportions, names_to = "cluster", values_to = "number", 2:12)
+proportions$prop <- (proportions$number/proportions$total)*100
+proportions$cluster <- factor(proportions$cluster, 
+levels =c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T", "NK", "B",
+"Classical_mono", "Intermediate_mono", "Non_classical_mono", "DC", "neutrophil"))
+p1 <- ggplot(proportions, aes(x = donor, y = prop, fill = cluster))+
+  geom_col()+theme_bw()+
+  theme(axis.text.y = element_text(size = 12, colour = "black"))+
+  theme(axis.text.x = element_text(size = 8, colour = "black", angle =45, hjust=1))+
+  theme(strip.text=element_text(size = 14, colour = "black", face = "bold"))+
+  theme(axis.title=element_text(size=16, colour ="black"))+
+  scale_fill_manual(values = cluster_palette)+
+  scale_y_continuous(expand = c(0,0))+
+  labs(x = "Donor", y = "% of whole blood", fill = NULL)+
+  theme(legend.text = element_text(size = 14))
+
+p1
+ggsave(plot=p1, filename = "cluster_proportions_barplot.png", dpi = 500, height = 12, width = 6)
+```
+
+## differential abundance analysis
+### set data up for mixed-effects model
+### here im getting counts per cluster, total cells per sample, then a summary
+### before that i need to make sure every cluster is present for every donor, even if there are 0 cells (e.g. in tregs) to ensure downstream the analysis works
+```{r}
+# Get unique clusters and samples
+all_combos <- expand.grid(
+  sample_id = unique(neut.data$sample_id),
+  labels = unique(neut.data$labels),
+  stringsAsFactors = FALSE
+)
+
+# Get metadata per sample
+sample_metadata <- neut.data %>%
+  dplyr::select(sample_id, donor, treatment, time_new) %>%
+  distinct()
+
+# Merge sample-cluster combos with metadata
+all_combos <- all_combos %>%
+  left_join(sample_metadata, by = "sample_id")
+
+# Get cluster counts
+cluster_counts <- neut.data %>%
+  group_by(sample_id, donor, labels, treatment, time_new) %>%
+  summarise(cluster_count = n(), .groups = "drop")
+
+# Fill in missing combinations with 0s
+cluster_counts <- all_combos %>%
+  left_join(cluster_counts, by = c("sample_id", "donor", "labels", "treatment", "time_new")) %>%
+  mutate(cluster_count = replace_na(cluster_count, 0))
+
+total_cells <- neut.data %>%
+  group_by(sample_id) %>%
+  summarise(total_cells = n(), .groups = "drop")
+counts_summary <- cluster_counts %>%
+  left_join(total_cells, by = "sample_id")
+
+clusters <- unique(counts_summary$labels)
+```
+
+### next i get the "delta" or relative/fold change
+```{r}
+delta_data <- counts_summary %>%
+  group_by(donor, time_new) %>%
+  mutate(prop = cluster_count / total_cells) %>%  # Proportion per cluster
+  group_by(donor, labels) %>%
+  mutate(
+    baseline_prop = prop[time_new == "-72h"],  # or "-72h" if that's your baseline
+    delta = prop / baseline_prop
+  ) %>%
+  ungroup()
+```
+
+## define function to loop the mixed model over each cluster
+### the model is a lmer, accounting for paired samples where possible
+### we then get the estimated means ande constrast results (basicalyy the p values)
+```{r}
+analyse_cluster <- function(cluster_name) {
+  dat_clust <- delta_data %>% filter(labels == cluster_name)
+  
+  model <- tryCatch({
+    lmer(
+      delta ~ treatment * time_new + (1 | donor),
+      data = dat_clust
+    )
+  }, error = function(e) {
+    message(paste("Model failed for cluster", cluster_name))
+    return(NULL)
+  })
+  
+  if (is.null(model)) return(NULL)
+  
+  emm <- emmeans(model, ~ treatment | time_new, type = "response")
+  contrasts <- contrast(emm, method = "pairwise")
+  list(
+    cluster = cluster_name,
+    model_summary = summary(model),
+    emmeans = emm,
+    contrasts = contrasts
+  )
+}
+```
+
+## run the model and get the results
+```{r}
+results_list <- lapply(clusters, analyse_cluster)
+names(results_list) <- clusters
+
+# Filter out clusters where model failed (if any)
+results_list <- results_list[!sapply(results_list, is.null)]
+
+# Example: access contrasts for the first cluster
+print(results_list[[1]]$contrasts)
+```
+
+## here we access the results list, pulling out the emmeans and contrasts with a function
+## then combine into usable dataframes
+```{r}
+# Function to get EMMs + contrasts with p-values for plotting
+extract_emm_and_contrasts <- function(cluster_name, results_list) {
+  emm_df <- as.data.frame(results_list[[cluster_name]]$emmeans)
+  contrasts_df <- as.data.frame(results_list[[cluster_name]]$contrasts)
+  
+  # Add cluster ID to both
+  emm_df$cluster_id <- cluster_name
+  contrasts_df$cluster_id <- cluster_name
+  
+  list(emm = emm_df, contrast = contrasts_df)
+}
+
+# Apply to all clusters
+emm_contrast_list <- lapply(names(results_list), extract_emm_and_contrasts, results_list = results_list)
+
+# Combine into data frames
+emm_all <- bind_rows(lapply(emm_contrast_list, `[[`, "emm"))
+contrast_all <- bind_rows(lapply(emm_contrast_list, `[[`, "contrast"))
+```
+
+## add a column specifying if a result was significant so that we can use these in the plot
+## add a value that is above the upper confidence interval by a little bit so that the asterisks will sit above them on the plot
+## join these columns back in witht he contrasts_all df
+```{r}
+# Extract timepoint and treatment comparison from contrast row names
+contrast_all <- contrast_all %>%
+  mutate(
+    sig_label = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+max_prob <- emm_all %>%
+  group_by(cluster_id) %>%
+  summarise(max_y = max(upper.CL, na.rm = TRUE)) %>%
+  mutate(label_y = max_y +0.05)
+
+contrast_all <- contrast_all %>%
+  left_join(max_prob, by = "cluster_id")
+```
+
+## plot the results and save
+```{r}
+plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
+  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey50")+
+  geom_line(position = position_dodge(width=0.4)) +
+  geom_point(position = position_dodge(width=0.4)) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2,
+  position = position_dodge(width=0.4)) +
+  geom_text(
+    data = contrast_all %>% filter(sig_label != ""),
+    aes(x = time_new, y = label_y, label = sig_label),
+    inherit.aes = FALSE,
+    size = 7
+  ) +
+  facet_wrap(~cluster_id, scales = "free_y") +
+  labs(
+    title = "Relative change of cluster proportions over time",
+    y = "Relative change",
+    x = "Timepoint",
+    colour = "Treatment"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+scale_colour_manual(values=c("mediumseagreen", "darkorchid2"))+ 
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15)))+
+  theme(axis.text = element_text(size = 12, colour = "black"),
+  strip.text = element_text(size = 12, colour = "black", face = "bold"),
+  axis.title = element_text(size = 14, colour = "black"))+ 
+    theme(legend.text = element_text(size = 14),legend.title = element_text(size = 15))+
+  guides(colour = guide_legend(override.aes = list(size = 5)))
+plot1
+#change name of plot if neuts are excluded
+ggsave(plot=plot1,filename="relative_change_proportions.png", dpi = 500,
+height = 8, width = 12, bg="white")
+```
+
+## assessing marker expression over time
+### the first plot here is just a sense check to see how things behave (in this case in tregs)
+### i will save the mixed model for specific markers/custers, otherwise its just too many to run and is fishing too strongly
+```{r}
+expression_input <- pivot_longer(neut.data, names_to = "marker", values_to="expression", 1:31)
+exp <- expression_input %>%
+  group_by(donor, treatment, labels, marker, time_new) %>%
+  summarise(mean = mean(expression, na.rm = TRUE), .groups = "drop") %>%
+  group_by(donor, treatment, labels, marker) %>%
+  mutate(
+    baseline = if (any(time_new == "-72h")) {
+      mean[time_new == "-72h"]
+    } else {
+      0  # Set baseline to 0 if no -72h value exists
+    }
+  ) %>%
+  ungroup()
+
+ggplot(filter(exp, labels %in% "Treg"), aes(x = time_new, y = mean, colour=treatment, group = treatment))+
+    geom_smooth(se=F)+
+    geom_point()+facet_wrap(~marker, scales = "free_y")+theme_bw()
+```
+
+## i'll inspect general changes in marker expression to try and hone in on specific marker/cluster pairs
+```{r}
+
 ```
