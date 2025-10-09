@@ -79,8 +79,12 @@ ggplot(delta, aes(x = k, y = y))+geom_point(size = 5)+geom_line(linewidth = 1.5)
 ## create umap
 ```{r}
 sce <- runDR(sce, "UMAP", features = NULL)
+#saveRDS(sce, file= "agile_blood_subclustered.rds", compress = F)
 ```
 
+```{r}
+sce <- readRDS("agile_blood_subclustered.rds")
+```
 ## inspect the umaps based on metadata and then clustering resolution
 ### this code is all the same as the initial clustering script so has been put into one code chunk for brevity
 ```{r}
@@ -140,7 +144,7 @@ ggsave(combo, filename="subclustering_qc.png", dpi=500, height=10, width = 20)
 ### i will filter out these clusters
 ## made an exception for cluster 10, as this has reasoable foxp3, so might be a (sverely underrepresented) treg population
 ```{r}
-sce <- filterSCE(sce, k = "meta20", cluster_id %in% c("1", "3", "4", "6", "8", "9", "10", "11",
+sce <- filterSCE(sce, k = "meta20", cluster_id %in% c("1", "3", "5", "6", "9", "10", "11",
 "14", "16", "17", "19"))
 ```
 
@@ -155,10 +159,16 @@ p2
 
 ### make and apply the labels
 ```{r}
-merging.table <- data.frame("original" = c(1,2,3,4,5,6,7,10,11,12,13,14,15,16,17,18,19,20), 
-"labels" = c("neutrophil", "neutrophil", "neutrophil", "classical_mono", "neutrophil", "neutrophil", "NK", "CD4+T", "CD4+T", "T", "CD8+T", "non_classical_mono", "classical_mono", "DC", "DC", "CD4+T","CD8+T","B"))
+merging.table <- data.frame("original" = c(1,3,5,6,9,10,11,14,16,17,19), 
+"labels" = c("CD4+T", "Memory CD8+T", "Naive CD8+T", "T", "DC", "Treg", "Non_classical_mono", "NK", "Intermediate_mono", "Classical_mono", "B"))
 
 sce <- mergeClusters(sce, k = "meta20", table = merging.table, id = "labels", overwrite = T)
 
 sce$labels <- cluster_ids(sce, k = "labels")
+```
+
+## save annotated object
+```{r}
+saveRDS(sce, file="agile_blood_subclustered_annotated.rds", compress=F)
+sce <- readRDS("agile_blood_subclustered_annotated.rds")
 ```
