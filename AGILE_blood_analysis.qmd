@@ -380,11 +380,14 @@ ggsave(plot=p1, filename = "cluster_proportions_barplot.png", dpi = 500, height 
 ### set data up for mixed-effects model
 ### here im getting counts per cluster, total cells per sample, then a summary
 ### next i get the "delta" or relative/fold change
+### an optional line is to filter the neutrophils out to avoid their overwhelming affect on all other cell proportions
 ```{r}
 cluster_counts <- neut.data %>%
+  #filter(!labels %in% "neutrophil") %>%
   group_by(sample_id,donor, labels, treatment, time_new) %>%
   summarise(cluster_count = n(), .groups = "drop")
 total_cells <- neut.data %>%
+  #filter(!labels %in% "neutrophil") %>%
   group_by(sample_id) %>%
   summarise(total_cells = n(), .groups = "drop")
 counts_summary <- cluster_counts %>%
@@ -522,6 +525,7 @@ plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group
     theme(legend.text = element_text(size = 14),legend.title = element_text(size = 15))+
   guides(colour = guide_legend(override.aes = list(size = 5)))
 plot1
+#change name of plot if neuts are excluded
 ggsave(plot=plot1,filename="relative_change_proportions.png", dpi = 500,
 height = 8, width = 12, bg="white")
 ```
