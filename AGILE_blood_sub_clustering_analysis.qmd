@@ -498,19 +498,31 @@ exp_by_treatment <- expression_input %>%
 
 ## for the heatmap i need scaled expression, as ggplot wont do that
 ## trim the dataframe to only meaningful markers (e.g. don't care about cd4, cd8 ore neut marker expression changing), then plot heatmap
+### i also split the visualisations into groups of cell types, as some markers arent applicable to all
 ```{r}
-logfc_df <- exp_by_treatment %>%
+plot_input <- exp_by_treatment %>%
   pivot_wider(names_from = treatment, values_from = median) %>%
-  mutate(log2FC = log2((corona+1e3 / guinness+1e3)))
-plot_input <- filter(logfc_df, !marker %in% c("CD45", "CD4", "CD8", "CD15", "CD66b", "CD3"))
+  mutate(diff = corona - guinness)
+quant_limits <- quantile(plot_input$diff, probs = c(0.025, 0.975), na.rm = TRUE)
+lower_limit <- quant_limits[1]
+upper_limit <- quant_limits[2]
 
-ggplot(plot_input, aes(x = time_new, y = marker, fill = log2FC))+geom_tile()+
+plot_input <- plot_input %>%
+  mutate(diff_capped = pmin(pmax(diff, lower_limit), upper_limit))
+
+plot_input <- filter(plot_input, !marker %in% c("CD45", "CD4", "CD8", "CD15", "CD66b", "CD3"))
+
+t <- plot_input %>% filter(labels %in% c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")) %>%
+    filter(marker %in% c("TIGIT", "PD1", "KI67", "FOXP3", "CTLA4", "CD47", "CD69", "CD62L","CD39", "CD28",
+    "CD25", "CD127", "CD103", "CCR6"))
+ggplot(t, aes(x = time_new, y = marker, fill = diff_capped))+geom_tile(colour = "black")+
     facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu")
 ```
 
-## an alternative is to plot relative change in expression from baseline
+## further investigation and plotting of markers that look like they are changing 
 ```{r}
-plot_input$rel_change <- plot_input$median/plot_input$baseline
-ggplot(plot_input, aes(x = time_new, y = median, colour = labels, group = labels))+geom_point()+theme_bw()+
-    facet_wrap(~marker+treatment)
+t_cells <- exp_by_donor %>% filter(labels %in% c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")) %>%
+    filter(marker %in% "KI67")
+ggplot(t_cells, aes(x = time_new, y = median, colour = treatment, group = treatment))+geom_point()+theme_bw()+
+    facet_wrap(~labels, scales="free_y")
 ```
