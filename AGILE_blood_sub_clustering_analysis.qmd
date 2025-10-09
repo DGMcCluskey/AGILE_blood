@@ -483,29 +483,34 @@ height = 8, width = 12, bg="white")
 ```
 
 ## assessing marker expression over time
-### the first plot here is just a sense check to see how things behave (in this case in tregs)
 ### i will save the mixed model for specific markers/custers, otherwise its just too many to run and is fishing too strongly
+### so beginning with a simple visualisations to assess overall changes
+### i need to get average expression per donor to start with (right now every cell is represented)
 ```{r}
 expression_input <- pivot_longer(neut.data, names_to = "marker", values_to="expression", 1:31)
-exp <- expression_input %>%
+exp_by_donor <- expression_input %>%
   group_by(donor, treatment, labels, marker, time_new) %>%
-  summarise(mean = mean(expression, na.rm = TRUE), .groups = "drop") %>%
-  group_by(donor, treatment, labels, marker) %>%
-  mutate(
-    baseline = if (any(time_new == "-72h")) {
-      mean[time_new == "-72h"]
-    } else {
-      0  # Set baseline to 0 if no -72h value exists
-    }
-  ) %>%
-  ungroup()
-
-ggplot(filter(exp, labels %in% "Treg"), aes(x = time_new, y = mean, colour=treatment, group = treatment))+
-    geom_smooth(se=F)+
-    geom_point()+facet_wrap(~marker, scales = "free_y")+theme_bw()
+  summarise(median = median(expression, na.rm = TRUE), .groups = "drop")
+exp_by_treatment <- expression_input %>%
+  group_by(treatment, labels, marker, time_new) %>%
+  summarise(median = median(expression, na.rm = TRUE), .groups = "drop")
 ```
 
-## i'll inspect general changes in marker expression to try and hone in on specific marker/cluster pairs
+## for the heatmap i need scaled expression, as ggplot wont do that
+## trim the dataframe to only meaningful markers (e.g. don't care about cd4, cd8 ore neut marker expression changing), then plot heatmap
 ```{r}
+logfc_df <- exp_by_treatment %>%
+  pivot_wider(names_from = treatment, values_from = median) %>%
+  mutate(log2FC = log2((corona+1e3 / guinness+1e3)))
+plot_input <- filter(logfc_df, !marker %in% c("CD45", "CD4", "CD8", "CD15", "CD66b", "CD3"))
 
+ggplot(plot_input, aes(x = time_new, y = marker, fill = log2FC))+geom_tile()+
+    facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu")
+```
+
+## an alternative is to plot relative change in expression from baseline
+```{r}
+plot_input$rel_change <- plot_input$median/plot_input$baseline
+ggplot(plot_input, aes(x = time_new, y = median, colour = labels, group = labels))+geom_point()+theme_bw()+
+    facet_wrap(~marker+treatment)
 ```
