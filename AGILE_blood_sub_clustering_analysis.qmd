@@ -519,10 +519,141 @@ ggplot(t, aes(x = time_new, y = marker, fill = diff_capped))+geom_tile(colour = 
     facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu")
 ```
 
-## further investigation and plotting of markers that look like they are changing 
+## further investigation and plotting of markers that look like they are changing
+## i plot these with a longitudinal line plot to see if trends are promising, then will run the lmm on them and plot the estimated means 
 ```{r}
-t_cells <- exp_by_donor %>% filter(labels %in% c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")) %>%
-    filter(marker %in% "KI67")
-ggplot(t_cells, aes(x = time_new, y = median, colour = treatment, group = treatment))+geom_point()+theme_bw()+
+model_input <- exp_by_donor %>%
+  filter(labels %in% c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")) %>%
+  filter(marker == "FOXP3")
+baseline_df <- model_input %>%
+  filter(time_new == "-72h") %>%
+  dplyr::select(donor, treatment, labels, marker, baseline = median)
+model_input <- model_input %>%
+  left_join(baseline_df, by = c("donor", "treatment", "labels", "marker"))
+
+ggplot(model_input, aes(x = time_new, y = median, colour = treatment, group = treatment))+theme_bw()+
+    stat_summary(fun=mean, geom = "point")+
+    stat_summary(fun=mean, geom="line")+
+    stat_summary(fun.data = mean_se, geom="errorbar", width = 0.2)+
     facet_wrap(~labels, scales="free_y")
+```
+
+```{r}
+analyse_cluster <- function(cluster_name) {
+  dat_clust <- model_input %>% filter(labels == cluster_name)
+  
+  model <- tryCatch({
+    lmer(
+      median ~ treatment * time_new + baseline + (1 | donor),
+      data = dat_clust
+    )
+  }, error = function(e) {
+    message(paste("Model failed for cluster", cluster_name))
+    return(NULL)
+  })
+  
+  if (is.null(model)) return(NULL)
+  
+  emm <- emmeans(model, ~ treatment | time_new, type = "response")
+  contrasts <- contrast(emm, method = "pairwise")
+  list(
+    cluster = cluster_name,
+    model_summary = summary(model),
+    emmeans = emm,
+    contrasts = contrasts
+  )
+}
+```
+
+## run the model and get the results
+```{r}
+results_list <- lapply(clusters, analyse_cluster)
+names(results_list) <- clusters
+
+# Filter out clusters where model failed (if any)
+results_list <- results_list[!sapply(results_list, is.null)]
+
+# Example: access contrasts for the first cluster
+print(results_list[[1]]$contrasts)
+```
+
+## here we access the results list, pulling out the emmeans and contrasts with a function
+## then combine into usable dataframes
+```{r}
+# Function to get EMMs + contrasts with p-values for plotting
+extract_emm_and_contrasts <- function(cluster_name, results_list) {
+  emm_df <- as.data.frame(results_list[[cluster_name]]$emmeans)
+  contrasts_df <- as.data.frame(results_list[[cluster_name]]$contrasts)
+  
+  # Add cluster ID to both
+  emm_df$cluster_id <- cluster_name
+  contrasts_df$cluster_id <- cluster_name
+  
+  list(emm = emm_df, contrast = contrasts_df)
+}
+
+# Apply to all clusters
+emm_contrast_list <- lapply(names(results_list), extract_emm_and_contrasts, results_list = results_list)
+
+# Combine into data frames
+emm_all <- bind_rows(lapply(emm_contrast_list, `[[`, "emm"))
+contrast_all <- bind_rows(lapply(emm_contrast_list, `[[`, "contrast"))
+```
+
+## add a column specifying if a result was significant so that we can use these in the plot
+## add a value that is above the upper confidence interval by a little bit so that the asterisks will sit above them on the plot
+## join these columns back in witht he contrasts_all df
+```{r}
+# Extract timepoint and treatment comparison from contrast row names
+contrast_all <- contrast_all %>%
+  mutate(
+    sig_label = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+max_prob <- emm_all %>%
+  group_by(cluster_id) %>%
+  summarise(max_y = max(upper.CL, na.rm = TRUE)) %>%
+  mutate(label_y = max_y +0.05)
+
+contrast_all <- contrast_all %>%
+  left_join(max_prob, by = "cluster_id")
+```
+
+## plot the results and save
+```{r}
+plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
+  geom_line(position = position_dodge(width=0.4)) +
+  geom_point(position = position_dodge(width=0.4)) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2,
+  position = position_dodge(width=0.4)) +
+  geom_text(
+    data = contrast_all %>% filter(sig_label != ""),
+    aes(x = time_new, y = label_y, label = sig_label),
+    inherit.aes = FALSE,
+    size = 7
+  ) +
+  facet_wrap(~cluster_id, scales = "free_y") +
+  labs(
+    title = "FOXP3 expression over time",
+    y = "FOXP3 expression",
+    x = "Timepoint",
+    colour = "Treatment"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+scale_colour_manual(values=c("mediumseagreen", "darkorchid2"))+ 
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15)))+
+  theme(axis.text = element_text(size = 12, colour = "black"),
+  strip.text = element_text(size = 12, colour = "black", face = "bold"),
+  axis.title = element_text(size = 14, colour = "black"))+ 
+    theme(legend.text = element_text(size = 14),legend.title = element_text(size = 15))+
+  guides(colour = guide_legend(override.aes = list(size = 5)))
+plot1
+#change name of plot if neuts are excluded
+ggsave(plot=plot1,filename="FOXP3_expression.png", dpi = 500,
+height = 8, width = 12, bg="white")
 ```
