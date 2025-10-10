@@ -522,9 +522,10 @@ ggplot(t, aes(x = time_new, y = marker, fill = diff_capped))+geom_tile(colour = 
 ## further investigation and plotting of markers that look like they are changing
 ## i plot these with a longitudinal line plot to see if trends are promising, then will run the lmm on them and plot the estimated means 
 ```{r}
+moi <- "CD25"
 model_input <- exp_by_donor %>%
   filter(labels %in% c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")) %>%
-  filter(marker == "FOXP3")
+  filter(marker == moi)
 baseline_df <- model_input %>%
   filter(time_new == "-72h") %>%
   dplyr::select(donor, treatment, labels, marker, baseline = median)
@@ -639,8 +640,8 @@ plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group
   ) +
   facet_wrap(~cluster_id, scales = "free_y") +
   labs(
-    title = "FOXP3 expression over time",
-    y = "FOXP3 expression",
+    title = paste0(moi," expression over time"),
+    y = paste0(moi, " expression"),
     x = "Timepoint",
     colour = "Treatment"
   ) +
@@ -654,6 +655,6 @@ plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group
   guides(colour = guide_legend(override.aes = list(size = 5)))
 plot1
 #change name of plot if neuts are excluded
-ggsave(plot=plot1,filename="FOXP3_expression.png", dpi = 500,
+ggsave(plot=plot1,filename=paste0(moi,"_expression.png"), dpi = 500,
 height = 8, width = 12, bg="white")
 ```
