@@ -510,21 +510,28 @@ upper_limit <- quant_limits[2]
 plot_input <- plot_input %>%
   mutate(diff_capped = pmin(pmax(diff, lower_limit), upper_limit))
 
-plot_input <- filter(plot_input, !marker %in% c("CD45", "CD4", "CD8", "CD15", "CD66b", "CD3"))
+plot_input <- filter(plot_input, !marker %in% c("CD45", "CD4", "CD8", "CD15", "CD66b", "CD3"), time_new %in% c("6h", "24h", "48h", "72h"))
 
 t <- plot_input %>% filter(labels %in% c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")) %>%
     filter(marker %in% c("TIGIT", "PD1", "KI67", "FOXP3", "CTLA4", "CD47", "CD69", "CD62L","CD39", "CD28",
-    "CD25", "CD127", "CD103", "CCR6"))
-ggplot(t, aes(x = time_new, y = marker, fill = diff_capped))+geom_tile(colour = "black")+
+    "CD25", "CD127", "CD103", "CCR6", "CXCR4", "CD1C", "GLUT1", "CXCR2"))
+myeloid <- plot_input %>% filter(labels %in% c("Classical_mono", "Intermediate_mono", "Non_classical_mono", "DC")) %>%
+    filter(marker %in% c("CD1c", "CD14", "CD16", "CCR6", "PD1", "CXCR4", "CD47", "CD86",
+    "CD11b", "CD69", "HLA-DR", "KI67", ""))
+ggplot(t, aes(x = time_new, y = marker, fill = diff))+geom_tile(colour = "black")+
+    facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu")
+ggplot(myeloid, aes(x = time_new, y = marker, fill = diff))+geom_tile(colour = "black")+
     facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu")
 ```
 
 ## further investigation and plotting of markers that look like they are changing
 ## i plot these with a longitudinal line plot to see if trends are promising, then will run the lmm on them and plot the estimated means 
 ```{r}
-moi <- "CD25"
+moi <- "CD11b"
+t <- c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")
+myeloid <- c("Classical_mono", "Intermediate_mono", "Non_classical_mono", "DC")
 model_input <- exp_by_donor %>%
-  filter(labels %in% c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")) %>%
+  filter(labels %in% myeloid) %>%
   filter(marker == moi)
 baseline_df <- model_input %>%
   filter(time_new == "-72h") %>%
