@@ -203,6 +203,15 @@ neut.data$date <- as.factor(neut.data$date)
 neut.data$Drift = as.numeric(neut.data$Drift)
 ```
 
+## as a quality control/inspection, plot all markers in a histogram and scatter, to see if they possess positivity
+```{r}
+expression_input <- pivot_longer(neut.data, names_to = "marker", values_to="expression", 1:31)
+p1 <- ggplot(expression_input, aes(x=expression))+theme_bw()+
+    facet_wrap(~marker, scales = "free")+geom_density()
+p1
+ggsave(plot=p1, filename="qc_marker_expression_hisotgrams.png", dpi = 500,height=12,width=14)
+```
+
 ## annotated umaps
 ```{r}
 cluster_palette <- c("seagreen3", "darkgreen", "indianred2", "red", "darkred", "darkorchid2", "orange",
@@ -381,7 +390,7 @@ analyse_cluster <- function(cluster_name) {
   
   model <- tryCatch({
     lmer(
-      delta ~ treatment * time_new + Age + Drift + (1 | donor),
+      delta ~ treatment * time_new + (1 | donor),
       data = dat_clust
     )
   }, error = function(e) {
@@ -477,8 +486,8 @@ plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group
   ) +
   facet_wrap(~cluster_id, scales = "free_y") +
   labs(
-    title = "Relative change of cluster proportions over time",
-    y = "Relative change",
+    title = "Log2 fold change of cluster proportions over time",
+    y = "Log2FC",
     x = "Timepoint",
     colour = "Treatment"
   ) +
@@ -500,29 +509,30 @@ height = 8, width = 12, bg="white")
 ### i will save the mixed model for specific markers/custers, otherwise its just too many to run and is fishing too strongly
 ### so beginning with a simple visualisations to assess overall changes
 ### i need to get average expression per donor to start with (right now every cell is represented)
+### to do this, i average by donor and then will average across treatment (in two stages), which will match the averaging by donor i do for the lmm (averaging straight to treatment here would give different results)
 ```{r}
 expression_input <- pivot_longer(neut.data, names_to = "marker", values_to="expression", 1:31)
 exp_by_donor <- expression_input %>%
   group_by(donor, treatment, labels, marker, time_new) %>%
   summarise(median = median(expression, na.rm = TRUE), .groups = "drop")
-exp_by_treatment <- expression_input %>%
+# Now aggregate *again* to match the treatment-level summary, 
+# but using donor-level medians instead of raw expression
+exp_by_treatment_from_donors <- exp_by_donor %>%
   group_by(treatment, labels, marker, time_new) %>%
-  summarise(median = median(expression, na.rm = TRUE), .groups = "drop")
+  summarise(median = median(median, na.rm = TRUE), .groups = "drop")  # second median
 ```
 
 ## for the heatmap i need scaled expression, as ggplot wont do that
 ## trim the dataframe to only meaningful markers (e.g. don't care about cd4, cd8 ore neut marker expression changing), then plot heatmap
 ### i also split the visualisations into groups of cell types, as some markers arent applicable to all
 ```{r}
-plot_input <- exp_by_treatment %>%
-  pivot_wider(names_from = treatment, values_from = median) %>%
-  mutate(diff = corona - guinness)
-quant_limits <- quantile(plot_input$diff, probs = c(0.025, 0.975), na.rm = TRUE)
-lower_limit <- quant_limits[1]
-upper_limit <- quant_limits[2]
-
+baseline_df <- exp_by_treatment_from_donors %>%
+  filter(time_new == "-72h") %>%
+  dplyr::select(treatment, labels, marker, baseline = median)
+plot_input <- exp_by_treatment_from_donors %>%
+  left_join(baseline_df, by = c("treatment", "labels", "marker"))
 plot_input <- plot_input %>%
-  mutate(diff_capped = pmin(pmax(diff, lower_limit), upper_limit))
+  mutate(change_from_baseline = median - baseline)
 
 plot_input <- filter(plot_input, !marker %in% c("CD45", "CD4", "CD8", "CD15", "CD66b", "CD3"), time_new %in% c("6h", "24h", "48h", "72h"))
 
@@ -532,28 +542,39 @@ t <- plot_input %>% filter(labels %in% c("CD4+T", "Treg", "Naive CD8+T", "Memory
 myeloid <- plot_input %>% filter(labels %in% c("Classical_mono", "Intermediate_mono", "Non_classical_mono", "DC")) %>%
     filter(marker %in% c("CD1c", "CD14", "CD16", "CCR6", "PD1", "CXCR4", "CD47", "CD86",
     "CD11b", "CD69", "HLA-DR", "KI67", ""))
-ggplot(t, aes(x = time_new, y = marker, fill = diff_capped))+geom_tile(colour = "black")+
-    facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu", limits = max(abs(t$diff_capped)) * c(-1, 1))
-ggplot(myeloid, aes(x = time_new, y = marker, fill = diff_capped))+geom_tile(colour = "black")+
-    facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu",
-    limits = max(abs(myeloid$diff_capped)) * c(-1, 1))
+plot1 <- ggplot(t, aes(x = time_new, y = marker, fill = change_from_baseline))+geom_tile(colour = "black")+theme_bw()+
+    facet_grid(labels~treatment)+scale_fill_distiller(palette = "RdBu", limits = max(abs(t$change_from_baseline)) * c(-1, 1))+theme(axis.text=element_text(size=12,colour="black"))+theme(strip.text = element_text(size=12,colour="black"))
+plot1
+ggsave(plot=plot1,filename="T_cell_marker_change.png", dpi=500,height=14,width=6,bg="white")
+plot2 <- ggplot(myeloid, aes(x = time_new, y = marker, fill = change_from_baseline))+geom_tile(colour = "black")+theme_bw()+
+    facet_grid(labels~treatment)+scale_fill_distiller(palette = "RdBu",
+    limits = max(abs(myeloid$change_from_baseline)) * c(-1, 1))+theme(axis.text=element_text(size=12,colour="black"))+
+        theme(strip.text = element_text(size=12,colour="black"))
+plot2
+ggsave(plot=plot2,filename="myeloid_marker_change.png", dpi=500,height=10,width=6,bg="white")
 ```
 
 ## further investigation and plotting of markers that look like they are changing
 ## i plot these with a longitudinal line plot to see if trends are promising, then will run the lmm on them and plot the estimated means 
 ## before the lmm i also remove -72h(baseline) from the time column, as this will be used as a covariate and not an outcome
 ```{r}
-moi <- "FOXP3"
+exp_by_donor <- expression_input %>%
+  group_by(donor, treatment, labels, marker, time_new, Age, Drift) %>%
+  summarise(median = median(expression, na.rm = TRUE), .groups = "drop")
+moi <- "CD25"
 t <- c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")
 myeloid <- c("Classical_mono", "Intermediate_mono", "Non_classical_mono", "DC")
 model_input <- exp_by_donor %>%
-  filter(labels %in% myeloid) %>% #change cell type/group here
+  filter(labels %in% t) %>% #change cell type/group here
   filter(marker == moi)
 baseline_df <- model_input %>%
   filter(time_new == "-72h") %>%
-  dplyr::select(donor, treatment, labels, marker, baseline = median)
+  dplyr::select(donor, treatment, labels, marker, Age, Drift, baseline = median)
 model_input <- model_input %>%
-  left_join(baseline_df, by = c("donor", "treatment", "labels", "marker"))
+  left_join(baseline_df, by = c("donor", "treatment", "labels", "marker", "Age", "Drift"))
+
+model_input <- model_input %>%
+  mutate(change_from_baseline = median - baseline)
 
 median_iqr <- function(x) {
   q1 <- quantile(x, 0.25, na.rm = TRUE)
@@ -561,14 +582,14 @@ median_iqr <- function(x) {
   med <- median(x, na.rm = TRUE)
   data.frame(y = med, ymin = q1, ymax = q3)
 }
-
-ggplot(model_input, aes(x = time_new, y = median, colour = treatment, group = treatment))+theme_bw()+
+ggplot(model_input, aes(x = time_new, y = change_from_baseline, colour = treatment, group = treatment))+theme_bw()+
     stat_summary(fun=median, geom = "point")+
     stat_summary(fun=median, geom="line")+
     stat_summary(fun.data = median_iqr, geom="errorbar", width = 0.2)+
     facet_wrap(~labels, scales="free_y")
 
 model_input <- filter(model_input, !time_new %in% "-72h")
+clusters <- unique(model_input$labels)
 ```
 
 ```{r}
@@ -577,7 +598,7 @@ analyse_cluster <- function(cluster_name) {
   
   model <- tryCatch({
     lmer(
-      median ~ treatment * time_new + baseline + (1 | donor),
+      change_from_baseline ~ treatment * time_new + (1 | donor),
       data = dat_clust
     )
   }, error = function(e) {
@@ -659,7 +680,7 @@ contrast_all <- contrast_all %>%
 
 ## plot the results and save
 ```{r}
-plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
+plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +geom_hline(yintercept=0, linetype="dashed", colour = "black")+
   geom_line(position = position_dodge(width=0.4)) +
   geom_point(position = position_dodge(width=0.4)) +
   geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2,
@@ -688,5 +709,5 @@ plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group
 plot1
 #change name of plot if neuts are excluded
 ggsave(plot=plot1,filename=paste0(moi,"_expression.png"), dpi = 500,
-height = 8, width = 12, bg="white")
+height = 6, width = 10, bg="white")
 ```
