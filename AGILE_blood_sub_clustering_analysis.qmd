@@ -190,6 +190,19 @@ neut.data$labels <- factor(neut.data$labels, levels =c("CD4+T", "Treg", "Naive C
 "Classical_mono", "Intermediate_mono", "Non_classical_mono", "DC", "neutrophil"))
 ```
 
+### here i will also load in some further patient metadata (age and date) and add to df
+### i made a column in excel called "Drift", which is baseically the time (days) since the first sample, to account for processing differences over the months
+```{r}
+metadata <- readxl::read_xlsx("Participant_info.xlsx")
+metadata <- metadata[, c(1,2,4,6)]
+names(metadata)[1] <- "donor"
+names(metadata)[3] <- "date"
+neut.data <- left_join(neut.data, metadata, by = "donor")
+neut.data$Age <- as.numeric(neut.data$Age)
+neut.data$date <- as.factor(neut.data$date)
+neut.data$Drift = as.numeric(neut.data$Drift)
+```
+
 ## annotated umaps
 ```{r}
 cluster_palette <- c("seagreen3", "darkgreen", "indianred2", "red", "darkred", "darkorchid2", "orange",
@@ -319,7 +332,7 @@ all_combos <- expand.grid(
 
 # Get metadata per sample
 sample_metadata <- neut.data %>%
-  dplyr::select(sample_id, donor, treatment, time_new) %>%
+  dplyr::select(sample_id, donor, treatment, time_new, Age, Drift) %>%
   distinct()
 
 # Merge sample-cluster combos with metadata
@@ -328,12 +341,12 @@ all_combos <- all_combos %>%
 
 # Get cluster counts
 cluster_counts <- neut.data %>%
-  group_by(sample_id, donor, labels, treatment, time_new) %>%
+  group_by(sample_id, donor, labels, treatment, time_new, Age, Drift) %>%
   summarise(cluster_count = n(), .groups = "drop")
 
 # Fill in missing combinations with 0s
 cluster_counts <- all_combos %>%
-  left_join(cluster_counts, by = c("sample_id", "donor", "labels", "treatment", "time_new")) %>%
+  left_join(cluster_counts, by = c("sample_id", "donor", "labels", "treatment", "time_new", "Age", "Drift")) %>%
   mutate(cluster_count = replace_na(cluster_count, 0))
 
 total_cells <- neut.data %>%
@@ -353,9 +366,10 @@ delta_data <- counts_summary %>%
   group_by(donor, labels) %>%
   mutate(
     baseline_prop = prop[time_new == "-72h"],  # or "-72h" if that's your baseline
-    delta = prop / baseline_prop
+    delta = log2((prop + 1e-6) / (baseline_prop + 1e-6))
   ) %>%
-  ungroup()
+    ungroup() %>%
+  filter(time_new != "-72h")
 ```
 
 ## define function to loop the mixed model over each cluster
@@ -367,7 +381,7 @@ analyse_cluster <- function(cluster_name) {
   
   model <- tryCatch({
     lmer(
-      delta ~ treatment * time_new + (1 | donor),
+      delta ~ treatment * time_new + Age + Drift + (1 | donor),
       data = dat_clust
     )
   }, error = function(e) {
@@ -450,7 +464,7 @@ contrast_all <- contrast_all %>%
 ## plot the results and save
 ```{r}
 plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
-  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey50")+
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50")+
   geom_line(position = position_dodge(width=0.4)) +
   geom_point(position = position_dodge(width=0.4)) +
   geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2,
@@ -518,20 +532,22 @@ t <- plot_input %>% filter(labels %in% c("CD4+T", "Treg", "Naive CD8+T", "Memory
 myeloid <- plot_input %>% filter(labels %in% c("Classical_mono", "Intermediate_mono", "Non_classical_mono", "DC")) %>%
     filter(marker %in% c("CD1c", "CD14", "CD16", "CCR6", "PD1", "CXCR4", "CD47", "CD86",
     "CD11b", "CD69", "HLA-DR", "KI67", ""))
-ggplot(t, aes(x = time_new, y = marker, fill = diff))+geom_tile(colour = "black")+
-    facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu")
-ggplot(myeloid, aes(x = time_new, y = marker, fill = diff))+geom_tile(colour = "black")+
-    facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu")
+ggplot(t, aes(x = time_new, y = marker, fill = diff_capped))+geom_tile(colour = "black")+
+    facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu", limits = max(abs(t$diff_capped)) * c(-1, 1))
+ggplot(myeloid, aes(x = time_new, y = marker, fill = diff_capped))+geom_tile(colour = "black")+
+    facet_wrap(~labels, ncol=11)+scale_fill_distiller(palette = "RdBu",
+    limits = max(abs(myeloid$diff_capped)) * c(-1, 1))
 ```
 
 ## further investigation and plotting of markers that look like they are changing
 ## i plot these with a longitudinal line plot to see if trends are promising, then will run the lmm on them and plot the estimated means 
+## before the lmm i also remove -72h(baseline) from the time column, as this will be used as a covariate and not an outcome
 ```{r}
-moi <- "CD11b"
+moi <- "FOXP3"
 t <- c("CD4+T", "Treg", "Naive CD8+T", "Memory CD8+T", "T")
 myeloid <- c("Classical_mono", "Intermediate_mono", "Non_classical_mono", "DC")
 model_input <- exp_by_donor %>%
-  filter(labels %in% myeloid) %>%
+  filter(labels %in% myeloid) %>% #change cell type/group here
   filter(marker == moi)
 baseline_df <- model_input %>%
   filter(time_new == "-72h") %>%
@@ -539,11 +555,20 @@ baseline_df <- model_input %>%
 model_input <- model_input %>%
   left_join(baseline_df, by = c("donor", "treatment", "labels", "marker"))
 
+median_iqr <- function(x) {
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  med <- median(x, na.rm = TRUE)
+  data.frame(y = med, ymin = q1, ymax = q3)
+}
+
 ggplot(model_input, aes(x = time_new, y = median, colour = treatment, group = treatment))+theme_bw()+
-    stat_summary(fun=mean, geom = "point")+
-    stat_summary(fun=mean, geom="line")+
-    stat_summary(fun.data = mean_se, geom="errorbar", width = 0.2)+
+    stat_summary(fun=median, geom = "point")+
+    stat_summary(fun=median, geom="line")+
+    stat_summary(fun.data = median_iqr, geom="errorbar", width = 0.2)+
     facet_wrap(~labels, scales="free_y")
+
+model_input <- filter(model_input, !time_new %in% "-72h")
 ```
 
 ```{r}
