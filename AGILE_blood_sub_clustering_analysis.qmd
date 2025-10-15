@@ -723,7 +723,7 @@ treg <- c("Treg")
 
 model_input <- exp_by_donor %>%
   filter(labels %in% treg) %>% #change cell type/group here
-  filter(marker == moi)
+  filter(marker %in% moi)
 baseline_df <- model_input %>%
   filter(time_new == "-72h") %>%
   dplyr::select(donor, treatment, labels, marker, Age, Drift, baseline = median)
@@ -733,5 +733,140 @@ model_input <- model_input %>%
 model_input <- model_input %>%
   mutate(change_from_baseline = median - baseline)
 model_input <- filter(model_input, !time_new %in% "-72h")
-clusters <- unique(model_input$labels)
+markers <- unique(model_input$marker)
+```
+
+
+```{r}
+analyse_marker <- function(marker_name) {
+  dat_marker <- model_input %>% filter(marker == marker_name)
+  
+  model <- tryCatch({
+    lmer(
+      change_from_baseline ~ treatment * time_new + (1 | donor),
+      data = dat_marker
+    )
+  }, error = function(e) {
+    message(paste("Model failed for marker", marker_name))
+    return(NULL)
+  })
+  
+  if (is.null(model)) return(NULL)
+  
+  emm <- emmeans(model, ~ treatment | time_new, type = "response")
+  contrasts <- contrast(emm, method = "pairwise")
+  list(
+    marker = marker_name,
+    model_summary = summary(model),
+    emmeans = emm,
+    contrasts = contrasts
+  )
+}
+```
+
+## run the model and get the results
+```{r}
+results_list <- lapply(markers, analyse_marker)
+names(results_list) <- markers
+
+# Filter out clusters where model failed (if any)
+results_list <- results_list[!sapply(results_list, is.null)]
+
+# Example: access contrasts for the first cluster
+print(results_list[[1]]$contrasts)
+```
+
+## here we access the results list, pulling out the emmeans and contrasts with a function
+## then combine into usable dataframes
+```{r}
+# Function to get EMMs + contrasts with p-values for plotting
+extract_emm_and_contrasts <- function(marker_name, results_list) {
+  emm_df <- as.data.frame(results_list[[marker_name]]$emmeans)
+  contrasts_df <- as.data.frame(results_list[[marker_name]]$contrasts)
+  
+  # Add cluster ID to both
+  emm_df$marker <- marker_name
+  contrasts_df$marker <- marker_name
+  
+  list(emm = emm_df, contrast = contrasts_df)
+}
+
+# Apply to all clusters
+emm_contrast_list <- lapply(names(results_list), extract_emm_and_contrasts, results_list = results_list)
+
+# Combine into data frames
+emm_all <- bind_rows(lapply(emm_contrast_list, `[[`, "emm"))
+contrast_all <- bind_rows(lapply(emm_contrast_list, `[[`, "contrast"))
+```
+
+## add a column specifying if a result was significant so that we can use these in the plot
+## add a value that is above the upper confidence interval by a little bit so that the asterisks will sit above them on the plot
+## join these columns back in witht he contrasts_all df
+```{r}
+# Extract timepoint and treatment comparison from contrast row names
+contrast_all <- contrast_all %>%
+  mutate(
+    sig_label = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+max_prob <- emm_all %>%
+  group_by(marker) %>%
+  summarise(max_y = max(upper.CL, na.rm = TRUE)) %>%
+  mutate(label_y = max_y +0.05)
+
+contrast_all <- contrast_all %>%
+  left_join(max_prob, by = "marker")
+```
+
+## plot the results and save
+## add some rows with 0 values at -72h just to highlight the deviation from baseline
+```{r}
+emm_all_extended <- bind_rows(
+  emm_all,
+  expand.grid(
+    treatment = unique(emm_all$treatment),
+    marker = unique(emm_all$marker),
+    time_new = "-72h"
+  ) %>%
+    mutate(emmean = 0, lower.CL = 0, upper.CL = 0)
+) %>%
+  mutate(
+    time_new = factor(time_new, levels = c("-72h", "0h", "6h", "24h", "48h", "72h"))
+  )
+
+plot1 <- ggplot(emm_all_extended, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +geom_hline(yintercept=0, linetype="dashed", colour = "black")+
+  geom_line(position = position_dodge(width=0.4)) +
+  geom_point(position = position_dodge(width=0.4)) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2,
+  position = position_dodge(width=0.4)) +
+  geom_text(
+    data = contrast_all %>% filter(sig_label != ""),
+    aes(x = time_new, y = label_y, label = sig_label),
+    inherit.aes = FALSE,
+    size = 7
+  ) +
+  facet_wrap(~marker, scales = "free_y") +
+  labs(
+    title = paste0("Treg marker expression"),
+    y = paste0(moi, " expression"),
+    x = "Timepoint",
+    colour = "Treatment"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+scale_colour_manual(values=c("mediumseagreen", "darkorchid2"))+ 
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15)))+
+  theme(axis.text = element_text(size = 12, colour = "black"),
+  strip.text = element_text(size = 12, colour = "black", face = "bold"),
+  axis.title = element_text(size = 14, colour = "black"))+ 
+    theme(legend.text = element_text(size = 14),legend.title = element_text(size = 15))+
+  guides(colour = guide_legend(override.aes = list(size = 5)))
+plot1
+#change name of plot if neuts are excluded
+ggsave(plot=plot1,filename=paste0("treg_marker_expression.png"), dpi = 500,
+height = 8, width = 12, bg="white")
 ```
