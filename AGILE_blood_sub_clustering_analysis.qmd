@@ -206,8 +206,9 @@ neut.data$Drift = as.numeric(neut.data$Drift)
 ## as a quality control/inspection, plot all markers in a histogram and scatter, to see if they possess positivity
 ```{r}
 expression_input <- pivot_longer(neut.data, names_to = "marker", values_to="expression", 1:31)
-p1 <- ggplot(expression_input, aes(x=expression))+theme_bw()+
-    facet_wrap(~marker, scales = "free")+geom_density()
+p1 <- ggplot(filter(expression_input, labels %in% c("CD4+T", "Treg")), aes(x=expression))+theme_bw()+
+    facet_wrap(~marker, scales = "free")+geom_density()+
+    theme(strip.text=element_text(size=14, colour = "black", face = "bold"))
 p1
 ggsave(plot=p1, filename="qc_marker_expression_hisotgrams.png", dpi = 500,height=12,width=14)
 ```
@@ -710,4 +711,27 @@ plot1
 #change name of plot if neuts are excluded
 ggsave(plot=plot1,filename=paste0(moi,"_expression.png"), dpi = 500,
 height = 6, width = 10, bg="white")
+```
+
+## based on Tregs appearing to have a lot of changes i will pull them out and assess multiple marker expression on them in one go for efficiency
+```{r}
+exp_by_donor <- expression_input %>%
+  group_by(donor, treatment, labels, marker, time_new, Age, Drift) %>%
+  summarise(median = median(expression, na.rm = TRUE), .groups = "drop")
+moi <- c("FOXP3", "CD25", "CTLA4", "CD28", "CD127", "CD39", "CD47", "CD62L", "CCR6", "CD69", "CXCR4", "PD1", "TIGIT", "KI67")
+treg <- c("Treg")
+
+model_input <- exp_by_donor %>%
+  filter(labels %in% treg) %>% #change cell type/group here
+  filter(marker == moi)
+baseline_df <- model_input %>%
+  filter(time_new == "-72h") %>%
+  dplyr::select(donor, treatment, labels, marker, Age, Drift, baseline = median)
+model_input <- model_input %>%
+  left_join(baseline_df, by = c("donor", "treatment", "labels", "marker", "Age", "Drift"))
+
+model_input <- model_input %>%
+  mutate(change_from_baseline = median - baseline)
+model_input <- filter(model_input, !time_new %in% "-72h")
+clusters <- unique(model_input$labels)
 ```
