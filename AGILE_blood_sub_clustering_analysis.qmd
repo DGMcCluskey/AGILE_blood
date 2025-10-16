@@ -471,9 +471,24 @@ contrast_all <- contrast_all %>%
   left_join(max_prob, by = "cluster_id")
 ```
 
+## add some rows that give baseline (-72h) some 0 values just for plotting
 ## plot the results and save
 ```{r}
-plot1 <- ggplot(emm_all, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
+emm_all_extended <- bind_rows(
+  emm_all,
+  expand.grid(
+    treatment = unique(emm_all$treatment),
+    cluster_id = unique(emm_all$cluster_id),
+    time_new = "-72h"
+  ) %>%
+    mutate(emmean = 0, lower.CL = 0, upper.CL = 0)
+) %>%
+  mutate(
+    time_new = factor(time_new, levels = c("-72h", "0h", "6h", "24h", "48h", "72h"))
+  )
+
+
+plot1 <- ggplot(emm_all_extended, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50")+
   geom_line(position = position_dodge(width=0.4)) +
   geom_point(position = position_dodge(width=0.4)) +
@@ -714,16 +729,16 @@ height = 6, width = 10, bg="white")
 ```
 
 ## based on Tregs appearing to have a lot of changes i will pull them out and assess multiple marker expression on them in one go for efficiency
+## i will run all markers then before plotting i'll pull out ones of interest/relevance
+## i've also set the code up to substitute in celltype of choice and save the plot with the name of the inputted celltype
 ```{r}
 exp_by_donor <- expression_input %>%
   group_by(donor, treatment, labels, marker, time_new, Age, Drift) %>%
   summarise(median = median(expression, na.rm = TRUE), .groups = "drop")
-moi <- c("FOXP3", "CD25", "CTLA4", "CD28", "CD127", "CD39", "CD47", "CD62L", "CCR6", "CD69", "CXCR4", "PD1", "TIGIT", "KI67")
-treg <- c("Treg")
+celltype <- c("Classical_mono") #change celltype here
 
 model_input <- exp_by_donor %>%
-  filter(labels %in% treg) %>% #change cell type/group here
-  filter(marker %in% moi)
+  filter(labels %in% celltype)
 baseline_df <- model_input %>%
   filter(time_new == "-72h") %>%
   dplyr::select(donor, treatment, labels, marker, Age, Drift, baseline = median)
@@ -735,7 +750,6 @@ model_input <- model_input %>%
 model_input <- filter(model_input, !time_new %in% "-72h")
 markers <- unique(model_input$marker)
 ```
-
 
 ```{r}
 analyse_marker <- function(marker_name) {
@@ -839,21 +853,33 @@ emm_all_extended <- bind_rows(
     time_new = factor(time_new, levels = c("-72h", "0h", "6h", "24h", "48h", "72h"))
   )
 
-plot1 <- ggplot(emm_all_extended, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +geom_hline(yintercept=0, linetype="dashed", colour = "black")+
+treg_markers <- c("FOXP3", "CD25", "CTLA4", "CD28", "CD127", "CD39", "CD47", "CD62L", "CCR6", "CD69", "CXCR4", "PD1", "TIGIT", "KI67", "GLUT1", "CD11b")
+myeloid_markers <- c("CD14", "CD16", "CD11b", "CD1c", "CD15", "CD39", "CD47", "CD62L", "CD69", "CD86", "CXCR4", "HLA-DR", "KI67", "GLUT1")
+
+marker_list <- switch(celltype,
+  "Treg" = treg_markers,
+  "Classical_mono" = myeloid_markers,
+  "Intermediate_mono" = myeloid_markers,
+  "Non_classical_mono" = myeloid_markers,
+  stop("Unknown celltype specified")
+)
+
+plot1 <- ggplot(emm_all_extended %>% filter(marker %in% marker_list), aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
+    geom_hline(yintercept=0, linetype="dashed", colour = "black")+
   geom_line(position = position_dodge(width=0.4)) +
   geom_point(position = position_dodge(width=0.4)) +
   geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2,
   position = position_dodge(width=0.4)) +
   geom_text(
-    data = contrast_all %>% filter(sig_label != ""),
+    data = contrast_all %>% filter(sig_label != "") %>% filter(marker %in% marker_list),
     aes(x = time_new, y = label_y, label = sig_label),
     inherit.aes = FALSE,
     size = 7
   ) +
   facet_wrap(~marker, scales = "free_y") +
   labs(
-    title = paste0("Treg marker expression"),
-    y = paste0(moi, " expression"),
+    title = paste0(celltype, " marker expression"),
+    y = paste0("Expression"),
     x = "Timepoint",
     colour = "Treatment"
   ) +
@@ -867,6 +893,6 @@ plot1 <- ggplot(emm_all_extended, aes(x = time_new, y = emmean, colour = treatme
   guides(colour = guide_legend(override.aes = list(size = 5)))
 plot1
 #change name of plot if neuts are excluded
-ggsave(plot=plot1,filename=paste0("treg_marker_expression.png"), dpi = 500,
+ggsave(plot=plot1,filename=paste0(celltype, "_marker_expression.png"), dpi = 500,
 height = 8, width = 12, bg="white")
 ```
