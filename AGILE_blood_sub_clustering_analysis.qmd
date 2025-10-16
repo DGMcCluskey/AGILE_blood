@@ -904,7 +904,7 @@ height = 8, width = 12, bg="white")
 ```{r}
 marker_use <- c("CD69", "KI67")
 expressions_data <- pivot_longer(neut.data, names_to="marker", values_to="expression", 1:31)
-ggplot(expression_input %>% filter(time_new == "-72h" & marker %in% marker_use), 
+ggplot(expression_input %>% filter(time_new %in% c("-72h", "6h") & marker %in% marker_use), 
 aes(x=expression, y = labels, fill = labels))+theme_bw()+
     facet_wrap(~marker, scales = "free_x")+geom_density_ridges()+
     theme(strip.text=element_text(size=14, colour = "black", face = "bold"))+
