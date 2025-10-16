@@ -1,0 +1,28 @@
+---
+title: "Untitled"
+format: html
+---
+
+## using machine learning approaches (sPLS-DA and randomforest) to indentify features that discriminate treatment arms at each timepont
+```{r}
+library(mixOmics)
+library(tidyverse)
+```
+
+
+```{r}
+setwd("c:/Users/dan_m/OneDrive - University College London/UCL_Senior_Research_Fellow/AGILE/Blood/sub_clustering")
+blood_df <- readRDS("AGILE_blood_dataframe.rds")
+```
+
+
+```{r}
+exp_by_donor <- blood_df %>% pivot_longer(names_to="marker", values_to="expression", cols=c(1:31))
+exp_by_donor <- exp_by_donor %>% group_by(donor,time_new,treatment,marker) %>% summarise(median = median(expression))
+
+marker_data_tp <- exp_by_donor %>%
+  filter(time_new == "6h") %>%  # Choose your timepoint
+  select(donor, treatment, marker, expression) %>%
+  pivot_wider(names_from = marker, values_from = median)
+
+```

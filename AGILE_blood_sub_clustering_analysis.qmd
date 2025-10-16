@@ -205,6 +205,12 @@ neut.data$date <- as.factor(neut.data$date)
 neut.data$Drift = as.numeric(neut.data$Drift)
 ```
 
+## save/load dataframe
+```{r}
+#saveRDS(neut.data, file = "AGILE_blood_dataframe.rds", compress = F)
+neut.data <- readRDS("AGILE_blood_dataframe.rds")
+```
+
 ## as a quality control/inspection, plot all markers in a histogram and scatter, to see if they possess positivity
 ```{r}
 expression_input <- pivot_longer(neut.data, names_to = "marker", values_to="expression", 1:31)
