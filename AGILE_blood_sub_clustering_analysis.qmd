@@ -45,6 +45,7 @@ library(lme4)
 library(emmeans)
 library(purrr)
 library(randomcoloR)
+library(ggridges)
 ```
 ```{r}
 setwd("c:/Users/dan_m/OneDrive - University College London/UCL_Senior_Research_Fellow/AGILE/Blood")
@@ -85,6 +86,7 @@ sce <- runDR(sce, "UMAP", features = NULL)
 ```{r}
 sce <- readRDS("agile_blood_subclustered.rds")
 ```
+
 ## inspect the umaps based on metadata and then clustering resolution
 ### this code is all the same as the initial clustering script so has been put into one code chunk for brevity
 ```{r}
@@ -735,8 +737,7 @@ height = 6, width = 10, bg="white")
 exp_by_donor <- expression_input %>%
   group_by(donor, treatment, labels, marker, time_new, Age, Drift) %>%
   summarise(median = median(expression, na.rm = TRUE), .groups = "drop")
-celltype <- c("Classical_mono") #change celltype here
-
+celltype <- c("DC") #change celltype here
 model_input <- exp_by_donor %>%
   filter(labels %in% celltype)
 baseline_df <- model_input %>%
@@ -853,7 +854,7 @@ emm_all_extended <- bind_rows(
     time_new = factor(time_new, levels = c("-72h", "0h", "6h", "24h", "48h", "72h"))
   )
 
-treg_markers <- c("FOXP3", "CD25", "CTLA4", "CD28", "CD127", "CD39", "CD47", "CD62L", "CCR6", "CD69", "CXCR4", "PD1", "TIGIT", "KI67", "GLUT1", "CD11b")
+treg_markers <- c("FOXP3", "CD25", "CTLA4", "CD28", "CD127", "CD39", "CD47", "CD62L", "CCR6", "CD69", "CXCR4", "PD1", "TIGIT", "KI67", "GLUT1", "CD4")
 myeloid_markers <- c("CD14", "CD16", "CD11b", "CD1c", "CD15", "CD39", "CD47", "CD62L", "CD69", "CD86", "CXCR4", "HLA-DR", "KI67", "GLUT1")
 
 marker_list <- switch(celltype,
@@ -861,6 +862,7 @@ marker_list <- switch(celltype,
   "Classical_mono" = myeloid_markers,
   "Intermediate_mono" = myeloid_markers,
   "Non_classical_mono" = myeloid_markers,
+  "DC" = myeloid_markers,
   stop("Unknown celltype specified")
 )
 
@@ -895,4 +897,18 @@ plot1
 #change name of plot if neuts are excluded
 ggsave(plot=plot1,filename=paste0(celltype, "_marker_expression.png"), dpi = 500,
 height = 8, width = 12, bg="white")
+```
+
+
+## even if a marker is changing longitudinally in a celltype, it may not be very highly expressed in the first place, so this needs to be checked
+```{r}
+marker_use <- c("CD69", "KI67")
+expressions_data <- pivot_longer(neut.data, names_to="marker", values_to="expression", 1:31)
+ggplot(expression_input %>% filter(time_new == "-72h" & marker %in% marker_use), 
+aes(x=expression, y = labels, fill = labels))+theme_bw()+
+    facet_wrap(~marker, scales = "free_x")+geom_density_ridges()+
+    theme(strip.text=element_text(size=14, colour = "black", face = "bold"))+
+    scale_fill_manual(values=cluster_palette)+
+    theme(axis.text=element_text(size=14, colour = "black"))+ylab(NULL)+
+    theme(axis.title=element_text(size=16, colour = "black"))
 ```
