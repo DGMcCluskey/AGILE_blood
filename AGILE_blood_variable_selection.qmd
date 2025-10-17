@@ -6,7 +6,8 @@ format: html
 ## using machine learning approaches (sPLS-DA and randomforest) to indentify features that discriminate treatment arms at each timepont
 ```{r}
 library(mixOmics)
-library(tidyverse)
+library(dplyr)
+library(tidyr)
 ```
 
 
@@ -18,11 +19,60 @@ blood_df <- readRDS("AGILE_blood_dataframe.rds")
 
 ```{r}
 exp_by_donor <- blood_df %>% pivot_longer(names_to="marker", values_to="expression", cols=c(1:31))
-exp_by_donor <- exp_by_donor %>% group_by(donor,time_new,treatment,marker) %>% summarise(median = median(expression))
+exp_by_donor <- exp_by_donor %>% group_by(donor,time_new,treatment,marker) %>% summarise(median = median(expression), .groups="drop")
+```
 
-marker_data_tp <- exp_by_donor %>%
-  filter(time_new == "6h") %>%  # Choose your timepoint
-  select(donor, treatment, marker, expression) %>%
-  pivot_wider(names_from = marker, values_from = median)
+```{r}
+# 1. Get all timepoints
+timepoints <- unique(exp_by_donor$time_new)
+
+# 2. Initialize list to hold top markers per timepoint
+top_markers_by_time <- list()
+loading_plots <- list()
+
+# 3. Loop through each timepoint
+for (tp in timepoints) {
+  cat("Processing timepoint:", tp, "\n")
+  
+  # Prep data for this timepoint
+  marker_data_tp <- exp_by_donor %>%
+    filter(time_new == tp) %>%
+    dplyr::select(donor, treatment, marker, median) %>%
+    pivot_wider(names_from = marker, values_from = median)
+  
+  # Remove rows with NA (if any donor is missing a marker)
+  marker_data_tp <- marker_data_tp %>% drop_na()
+  
+  # Prepare X and Y
+  X <- marker_data_tp %>% dplyr::select(-donor, -treatment) %>% as.matrix()
+  Y <- factor(marker_data_tp$treatment)
+  
+  # Optional: tune keepX (skip if consistent number of markers is fine)
+  keepX <- 10  # or use tune.splsda to set dynamically
+  
+  # Run sPLS-DA
+  splsda_res <- splsda(X, Y, ncomp = 1, keepX = keepX)
+  
+  # Extract top markers
+  top_vars <- selectVar(splsda_res, comp = 1)$name
+  top_markers_by_time[[tp]] <- top_vars
+
+  plot_obj <- plotLoadings(splsda_res, comp = 1, method = "mean", contrib = "max",
+                           title = paste("Top markers at", tp))
+
+  loading_plots[[tp]] <- plot_obj
+}
+
+# Combine into a dataframe
+top_markers_df <- stack(top_markers_by_time) %>%
+  rename(marker = values, timepoint = ind)
+
+print(top_markers_df)
+
+
+
+```
+```{r}
+plotLoadings(splsda_res, comp = 1, method = "mean", contrib = "max", title = paste("Top markers at", tp))
 
 ```
