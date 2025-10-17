@@ -68,11 +68,4 @@ top_markers_df <- stack(top_markers_by_time) %>%
   rename(marker = values, timepoint = ind)
 
 print(top_markers_df)
-
-
-
-```
-```{r}
-plotLoadings(splsda_res, comp = 1, method = "mean", contrib = "max", title = paste("Top markers at", tp))
-
 ```
