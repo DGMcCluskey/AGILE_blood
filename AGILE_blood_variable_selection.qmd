@@ -29,6 +29,7 @@ timepoints <- unique(exp_by_donor$time_new)
 # 2. Initialize list to hold top markers per timepoint
 top_markers_by_time <- list()
 loading_plots <- list()
+embedding_plots <- list()
 
 # 3. Loop through each timepoint
 for (tp in timepoints) {
@@ -51,15 +52,23 @@ for (tp in timepoints) {
   keepX <- 10  # or use tune.splsda to set dynamically
   
   # Run sPLS-DA
-  splsda_res <- splsda(X, Y, ncomp = 1, keepX = keepX)
+  splsda_res <- splsda(X, Y, ncomp = 2, keepX = keepX)
   
   # Extract top markers
   top_vars <- selectVar(splsda_res, comp = 1)$name
   top_markers_by_time[[tp]] <- top_vars
 
-  plot_obj <- plotLoadings(splsda_res, comp = 1, method = "mean", contrib = "max",
-                           title = paste("Top markers at", tp))
+  p_embed <- plotIndiv(splsda_res, comp = c(1,2), group = Y, legend = TRUE,
+                       title = paste("sPLS-DA:", tp),
+                       ellipse = TRUE, star = F, cex = 2.5, pch = 16,
+                       col=c("mediumseagreen", "darkorchid2"))
 
+  plot_obj <- plotLoadings(splsda_res, comp = 1, method = "mean", contrib = "max",
+                           title = paste("Top markers at", tp),
+                           legend.color=c("mediumseagreen", "darkorchid2"),
+                           size.name = 2)
+
+embedding_plots[[tp]] <- p_embed
   loading_plots[[tp]] <- plot_obj
 }
 
