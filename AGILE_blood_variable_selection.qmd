@@ -64,11 +64,11 @@ for (tp in timepoints) {
                        title = paste("sPLS-DA:", tp),
                        ellipse = TRUE, star = F, cex = 2.5, pch = 16,
                        col=c("mediumseagreen", "darkorchid2"), style="ggplot2")
-  plot_obj <- as.ggplot(~plotLoadings(splsda_res, comp = 1, style = "ggplot2",
+  plot_obj <- plotLoadings(splsda_res, comp = 1,
                                     method = "mean", contrib = "max",
                                     title = paste("Top markers at", tp),
                                     legend.color = c("mediumseagreen", "darkorchid2"),
-                                    size.name = 2))
+                                    size.name = 2)
 
 embedding_plots[[tp]] <- p_embed
   loading_plots[[tp]] <- plot_obj
@@ -84,7 +84,6 @@ print(top_markers_df)
 ## plot the embeddings in markers in a nice grid
 ```{r}
 ggplots_only <- lapply(embedding_plots, function(x) x$graph)
-
 ggplots_only <- lapply(seq_along(ggplots_only), function(i) {
   if (i == length(ggplots_only)) {
     ggplots_only[[i]]  # keep legend
@@ -97,19 +96,7 @@ ggplots_only <- lapply(seq_along(ggplots_only), function(i) {
 combo1 <- wrap_plots(ggplots_only, ncol = 6)
 combo1
 ggsave(plot=combo1, filename = "spls-da_embeddings.png", dpi=500, height=5,width=18)
-
-ggplots_only <- lapply(loading_plots, function(x) x)
-
-ggplots_only <- lapply(seq_along(ggplots_only), function(i) {
-  if (i == length(ggplots_only)) {
-    ggplots_only[[i]]  # keep legend
-  } else {
-    ggplots_only[[i]] + theme(legend.position = "none")
-  }
-})
-
-# Combine them into one patchwork layout
-combo2 <- wrap_plots(ggplots_only, ncol = 6)
-combo2
-ggsave(plot=combo2, filename = "spls-da_top_markers.png", dpi=500, height=5,width=20)
+```
+```{r}
+ggplot(loading_plots$`6h`$X, aes(x= ))
 ```
