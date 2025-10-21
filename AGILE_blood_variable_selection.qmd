@@ -28,7 +28,9 @@ exp_by_donor <- exp_by_donor %>% group_by(donor,time_new,treatment,marker) %>% s
 # Load mixOmics
 library(mixOmics)
 
-# Your loop with perf() added
+loading_plots <- list()
+embedding_plots <- list()
+
 for (tp in timepoints) {
   cat("Processing timepoint:", tp, "\n")
   
@@ -143,22 +145,22 @@ for (tp in timepoints) {
     keepX <- 10
     
     # Run sPLS-DA
-    splsda_res <- splsda(X, Y, ncomp = 2, keepX = keepX)
+    plsda_res <- plsda(X, Y, ncomp = 2)
     
     # Extract top markers
-    top_vars <- selectVar(splsda_res, comp = 1)$name
+    top_vars <- selectVar(plsda_res, comp = 1)$name
     
     # Use a compound key for the list (e.g., "TP1_Cluster5")
     key <- paste(tp, clust, sep = "_")
     top_markers_by_tp_clust[[key]] <- top_vars
     
     # Plot embeddings and loadings
-    p_embed <- plotIndiv(splsda_res, comp = c(1,2), group = Y, legend = TRUE,
+    p_embed <- plotIndiv(plsda_res, comp = c(1,2), group = Y, legend = TRUE,
                          title = paste("sPLS-DA: Time", tp, "| Cluster", clust),
                          ellipse = TRUE, star = FALSE, cex = 2.5, pch = 16,
                          col=c("mediumseagreen", "darkorchid2"), style="ggplot2")
     
-    plot_obj <- plotLoadings(splsda_res, comp = 1,
+    plot_obj <- plotLoadings(plsda_res, comp = 1,
                              method = "mean", contrib = "max",
                              title = paste("Top markers: Time", tp, "| Cluster", clust),
                              legend.color = c("mediumseagreen", "darkorchid2"),
@@ -182,8 +184,11 @@ print(top_markers_df)
 ```{r}
 plots <- lapply(embedding_plots, function(x) x$graph)
 treg <- plots$`-72h_Treg`+plots$`0h_Treg`+plots$`6h_Treg`+plots$`24h_Treg`+plots$`48h_Treg`+plots$`72h_Treg`
+treg
 b <- plots$`-72h_B`+plots$`0h_B`+plots$`6h_B`+plots$`24h_B`+plots$`48h_B`+plots$`72h_B`
 b
 nk <- plots$`-72h_NK`+plots$`0h_NK`+plots$`6h_NK`+plots$`24h_NK`+plots$`48h_NK`+plots$`72h_NK`
 nk
+cd4t <- plots$`-72h_CD4+T`+plots$`0h_CD4+T`+plots$`6h_CD4+T`+plots$`24h_CD4+T`+plots$`48h_CD4+T`+plots$`72h_CD4+T`
+cd4t
 ```
