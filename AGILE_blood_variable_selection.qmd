@@ -25,60 +25,58 @@ exp_by_donor <- exp_by_donor %>% group_by(donor,time_new,treatment,marker) %>% s
 ```
 
 ```{r}
-# 1. Get all timepoints
-timepoints <- unique(exp_by_donor$time_new)
+# Load mixOmics
+library(mixOmics)
 
-# 2. Initialize list to hold top markers per timepoint
-top_markers_by_time <- list()
-loading_plots <- list()
-embedding_plots <- list()
-
-# 3. Loop through each timepoint
+# Your loop with perf() added
 for (tp in timepoints) {
   cat("Processing timepoint:", tp, "\n")
   
-  # Prep data for this timepoint
   marker_data_tp <- exp_by_donor %>%
     filter(time_new == tp) %>%
     dplyr::select(donor, treatment, marker, median) %>%
-    pivot_wider(names_from = marker, values_from = median)
+    pivot_wider(names_from = marker, values_from = median) %>%
+    drop_na()
   
-  # Remove rows with NA (if any donor is missing a marker)
-  marker_data_tp <- marker_data_tp %>% drop_na()
-  
-  # Prepare X and Y
   X <- marker_data_tp %>% dplyr::select(-donor, -treatment) %>% as.matrix()
   Y <- factor(marker_data_tp$treatment)
   
-  # Optional: tune keepX (skip if consistent number of markers is fine)
-  keepX <- 10  # or use tune.splsda to set dynamically
-  
+  if (length(unique(Y)) < 2 || nrow(X) < 6) {
+    warning(paste("Skipping", tp, "due to insufficient groups or donors"))
+    next
+  }
+
   # Run sPLS-DA
-  splsda_res <- splsda(X, Y, ncomp = 2, keepX = keepX)
+  plsda_res <- plsda(X, Y, ncomp = 2)
   
+  # OPTIONAL: Run performance evaluation
+  perf_res <- perf(plsda_res, validation = "Mfold", folds = 5, progressBar = FALSE, nrepeat = 10)
+
+  # Print performance
+  cat("  Error rates (BER):", perf_res$error.rate$BER, "\n")
+
+  # Save performance if needed
+  # performance_by_time[[tp]] <- perf_res
+
   # Extract top markers
-  top_vars <- selectVar(splsda_res, comp = 1)$name
+  top_vars <- selectVar(plsda_res, comp = 1)$name
   top_markers_by_time[[tp]] <- top_vars
 
-  p_embed <- plotIndiv(splsda_res, comp = c(1,2), group = Y, legend = TRUE,
-                       title = paste("sPLS-DA:", tp),
+  # Plots
+  p_embed <- plotIndiv(plsda_res, comp = c(1,2), group = Y, legend = TRUE,
+                       title = paste("PLS-DA:", tp),
                        ellipse = TRUE, star = F, cex = 2.5, pch = 16,
                        col=c("mediumseagreen", "darkorchid2"), style="ggplot2")
-  plot_obj <- plotLoadings(splsda_res, comp = 1,
-                                    method = "mean", contrib = "max",
-                                    title = paste("Top markers at", tp),
-                                    legend.color = c("mediumseagreen", "darkorchid2"),
-                                    size.name = 2)
+  
+  plot_obj <- plotLoadings(plsda_res, comp = 1,
+                           method = "mean", contrib = "max",
+                           title = paste("Top markers at", tp),
+                           legend.color = c("mediumseagreen", "darkorchid2"),
+                           size.name = 2)
 
-embedding_plots[[tp]] <- p_embed
+  embedding_plots[[tp]] <- p_embed
   loading_plots[[tp]] <- plot_obj
 }
-
-# Combine into a dataframe
-top_markers_df <- stack(top_markers_by_time) %>%
-  rename(marker = values, timepoint = ind)
-
-print(top_markers_df)
 ```
 
 ## plot the embeddings in markers in a nice grid
@@ -95,8 +93,97 @@ ggplots_only <- lapply(seq_along(ggplots_only), function(i) {
 # Combine them into one patchwork layout
 combo1 <- wrap_plots(ggplots_only, ncol = 6)
 combo1
-ggsave(plot=combo1, filename = "spls-da_embeddings.png", dpi=500, height=5,width=18)
+ggsave(plot=combo1, filename = "pls-da_embeddings.png", dpi=500, height=5,width=18)
 ```
+
+## run sPLS-DA on each cluster individually
 ```{r}
-ggplot(loading_plots$`6h`$X, aes(x= ))
+exp_by_donor <- blood_df %>% pivot_longer(names_to="marker", values_to="expression", cols=c(1:31))
+exp_by_donor <- exp_by_donor %>% group_by(donor,time_new,treatment,marker,labels) %>% summarise(median = median(expression), .groups="drop")
+
+# 1. Get all timepoints
+timepoints <- unique(exp_by_donor$time_new)
+
+# 2. Initialize output lists
+top_markers_by_tp_clust <- list()
+loading_plots <- list()
+embedding_plots <- list()
+
+# 3. Loop through each timepoint
+for (tp in timepoints) {
+  cat("Processing timepoint:", tp, "\n")
+  
+  # Get clusters present in this timepoint
+  clusters_in_tp <- unique(exp_by_donor$labels[exp_by_donor$time_new == tp])
+  
+  # Loop through clusters within this timepoint
+  for (clust in clusters_in_tp) {
+    cat("  Processing cluster:", clust, "\n")
+    
+    # Filter for current timepoint and cluster
+    marker_data <- exp_by_donor %>%
+      filter(time_new == tp, labels == clust) %>%
+      dplyr::select(donor, treatment, marker, median) %>%
+      pivot_wider(names_from = marker, values_from = median)
+    
+    # Remove rows with NA (incomplete donor data)
+    marker_data <- marker_data %>% drop_na()
+    
+    # Check there are at least 2 treatment groups
+    if (length(unique(marker_data$treatment)) < 2) {
+      warning(paste("  Skipping cluster", clust, "at", tp, "- only one treatment group"))
+      next
+    }
+    
+    # Prepare X and Y
+    X <- marker_data %>% dplyr::select(-donor, -treatment) %>% as.matrix()
+    Y <- factor(marker_data$treatment)
+    
+    # Set number of top markers to keep
+    keepX <- 10
+    
+    # Run sPLS-DA
+    splsda_res <- splsda(X, Y, ncomp = 2, keepX = keepX)
+    
+    # Extract top markers
+    top_vars <- selectVar(splsda_res, comp = 1)$name
+    
+    # Use a compound key for the list (e.g., "TP1_Cluster5")
+    key <- paste(tp, clust, sep = "_")
+    top_markers_by_tp_clust[[key]] <- top_vars
+    
+    # Plot embeddings and loadings
+    p_embed <- plotIndiv(splsda_res, comp = c(1,2), group = Y, legend = TRUE,
+                         title = paste("sPLS-DA: Time", tp, "| Cluster", clust),
+                         ellipse = TRUE, star = FALSE, cex = 2.5, pch = 16,
+                         col=c("mediumseagreen", "darkorchid2"), style="ggplot2")
+    
+    plot_obj <- plotLoadings(splsda_res, comp = 1,
+                             method = "mean", contrib = "max",
+                             title = paste("Top markers: Time", tp, "| Cluster", clust),
+                             legend.color = c("mediumseagreen", "darkorchid2"),
+                             size.name = 2)
+    
+    # Save plots
+    embedding_plots[[key]] <- p_embed
+    loading_plots[[key]] <- plot_obj
+  }
+}
+
+# 4. Combine top markers into a dataframe
+top_markers_df <- stack(top_markers_by_tp_clust) %>%
+  rename(marker = values, tp_cluster = ind) %>%
+  tidyr::separate(tp_cluster, into = c("timepoint", "cluster"), sep = "_")
+
+print(top_markers_df)
+```
+
+## plot results by celltype
+```{r}
+plots <- lapply(embedding_plots, function(x) x$graph)
+treg <- plots$`-72h_Treg`+plots$`0h_Treg`+plots$`6h_Treg`+plots$`24h_Treg`+plots$`48h_Treg`+plots$`72h_Treg`
+b <- plots$`-72h_B`+plots$`0h_B`+plots$`6h_B`+plots$`24h_B`+plots$`48h_B`+plots$`72h_B`
+b
+nk <- plots$`-72h_NK`+plots$`0h_NK`+plots$`6h_NK`+plots$`24h_NK`+plots$`48h_NK`+plots$`72h_NK`
+nk
 ```
