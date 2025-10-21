@@ -49,10 +49,10 @@ for (tp in timepoints) {
   }
 
   # Run sPLS-DA
-  plsda_res <- plsda(X, Y, ncomp = 2)
+  splsda_res <- splsda(X, Y, ncomp = 2, keepX = 10)
   
   # OPTIONAL: Run performance evaluation
-  perf_res <- perf(plsda_res, validation = "Mfold", folds = 5, progressBar = FALSE, nrepeat = 10)
+  perf_res <- perf(splsda_res, validation = "Mfold", folds = 5, progressBar = FALSE, nrepeat = 10)
 
   # Print performance
   cat("  Error rates (BER):", perf_res$error.rate$BER, "\n")
@@ -61,16 +61,16 @@ for (tp in timepoints) {
   # performance_by_time[[tp]] <- perf_res
 
   # Extract top markers
-  top_vars <- selectVar(plsda_res, comp = 1)$name
+  top_vars <- selectVar(splsda_res, comp = 1)$name
   top_markers_by_time[[tp]] <- top_vars
 
   # Plots
-  p_embed <- plotIndiv(plsda_res, comp = c(1,2), group = Y, legend = TRUE,
-                       title = paste("PLS-DA:", tp),
+  p_embed <- plotIndiv(splsda_res, comp = c(1,2), group = Y, legend = TRUE,
+                       title = paste("sPLS-DA:", tp),
                        ellipse = TRUE, star = F, cex = 2.5, pch = 16,
                        col=c("mediumseagreen", "darkorchid2"), style="ggplot2")
   
-  plot_obj <- plotLoadings(plsda_res, comp = 1,
+  plot_obj <- plotLoadings(splsda_res, comp = 1,
                            method = "mean", contrib = "max",
                            title = paste("Top markers at", tp),
                            legend.color = c("mediumseagreen", "darkorchid2"),
@@ -95,7 +95,7 @@ ggplots_only <- lapply(seq_along(ggplots_only), function(i) {
 # Combine them into one patchwork layout
 combo1 <- wrap_plots(ggplots_only, ncol = 6)
 combo1
-ggsave(plot=combo1, filename = "pls-da_embeddings.png", dpi=500, height=5,width=18)
+ggsave(plot=combo1, filename = "spls-da_embeddings.png", dpi=500, height=5,width=18)
 ```
 
 ## run sPLS-DA on each cluster individually
@@ -145,22 +145,22 @@ for (tp in timepoints) {
     keepX <- 10
     
     # Run sPLS-DA
-    plsda_res <- plsda(X, Y, ncomp = 2)
+    splsda_res <- splsda(X, Y, ncomp = 2,keepX = keepX)
     
     # Extract top markers
-    top_vars <- selectVar(plsda_res, comp = 1)$name
+    top_vars <- selectVar(splsda_res, comp = 1)$name
     
     # Use a compound key for the list (e.g., "TP1_Cluster5")
     key <- paste(tp, clust, sep = "_")
     top_markers_by_tp_clust[[key]] <- top_vars
     
     # Plot embeddings and loadings
-    p_embed <- plotIndiv(plsda_res, comp = c(1,2), group = Y, legend = TRUE,
+    p_embed <- plotIndiv(splsda_res, comp = c(1,2), group = Y, legend = TRUE,
                          title = paste("sPLS-DA: Time", tp, "| Cluster", clust),
                          ellipse = TRUE, star = FALSE, cex = 2.5, pch = 16,
                          col=c("mediumseagreen", "darkorchid2"), style="ggplot2")
     
-    plot_obj <- plotLoadings(plsda_res, comp = 1,
+    plot_obj <- plotLoadings(splsda_res, comp = 1,
                              method = "mean", contrib = "max",
                              title = paste("Top markers: Time", tp, "| Cluster", clust),
                              legend.color = c("mediumseagreen", "darkorchid2"),
@@ -191,4 +191,9 @@ nk <- plots$`-72h_NK`+plots$`0h_NK`+plots$`6h_NK`+plots$`24h_NK`+plots$`48h_NK`+
 nk
 cd4t <- plots$`-72h_CD4+T`+plots$`0h_CD4+T`+plots$`6h_CD4+T`+plots$`24h_CD4+T`+plots$`48h_CD4+T`+plots$`72h_CD4+T`
 cd4t
+dc <- plots$`-72h_DC`+plots$`0h_DC`+plots$`6h_DC`+plots$`24h_DC`+plots$`48h_DC`+plots$`72h_DC`
+dc
+classical_mono <- plots$`72h_Classical_mono`+plots$`0h_Classical_mono`+plots$`6h_Classical_mono`+plots$`24h_Classical_mono`+plots$`48h_Classical_mono`+plots$`72h_Classical_mono`
+classical_mono
+
 ```
