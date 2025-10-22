@@ -26,10 +26,8 @@ exp_by_donor <- exp_by_donor %>% group_by(donor,time_new,treatment,marker) %>% s
 ```
 
 ```{r}
-loading_plots <- list()
-embedding_plots <- list()
 top_markers_by_time <- list()
-
+all_results <- data.frame()
 timepoints <- unique(exp_by_donor$time_new)
 
 for (tp in timepoints) {
@@ -65,38 +63,46 @@ for (tp in timepoints) {
   top_vars <- selectVar(splsda_res, comp = 1)$name
   top_markers_by_time[[tp]] <- top_vars
 
-  # Plots
-  p_embed <- plotIndiv(splsda_res, comp = c(1,2), group = Y, legend = TRUE,
-                       title = paste("sPLS-DA:", tp),
-                       ellipse = TRUE, star = F, cex = 2.5, pch = 16,
-                       col=c("mediumseagreen", "darkorchid2"), style="ggplot2")
-  
-  plot_obj <- plotLoadings(splsda_res, comp = 1,
-                           method = "mean", contrib = "max",
-                           title = paste("Top markers at", tp),
-                           legend.color = c("mediumseagreen", "darkorchid2"),
-                           size.name = 2)
+  # Extract sample coordinates on components 1 and 2
+    coords <- splsda_res$variates$X[, 1:2]
+    
+    # Build dataframe with embedding info
+    emb_df <- data.frame(coords) %>%
+      mutate(donor = marker_data_tp$donor,
+             treatment = marker_data_tp$treatment,
+             timepoint = tp)
+    
+    # Build dataframe for top markers
+    top_markers_df <- data.frame(
+      timepoint = tp,
+      marker = top_vars,
+      stringsAsFactors = FALSE
+    )
+    
+    # Combine results
+    # Here we keep embedding and top markers in separate dataframes but can store both
+    # For example, bind top markers info to a cumulative dataframe:
+    all_results <- bind_rows(all_results, emb_df)
+    
+    # Save plots as needed in a separate list (or save ggplot objects somewhere)
+    # embedding_plots[[paste(tp, clust, sep = "_")]] <- plotIndiv(...)
+    # loading_plots[[paste(tp, clust, sep = "_")]] <- plotLoadings(...)
+  }
 
-  embedding_plots[[tp]] <- p_embed
-  loading_plots[[tp]] <- plot_obj
-}
 ```
 
-## plot the embeddings in markers in a nice grid
+## plot the embeddings
+### testing out an animated visualisation
 ```{r}
-ggplots_only <- lapply(embedding_plots, function(x) x$graph)
-ggplots_only <- lapply(seq_along(ggplots_only), function(i) {
-  if (i == length(ggplots_only)) {
-    ggplots_only[[i]]  # keep legend
-  } else {
-    ggplots_only[[i]] + theme(legend.position = "none")
-  }
-})
-
-# Combine them into one patchwork layout
-combo1 <- wrap_plots(ggplots_only, ncol = 6)
-combo1
-ggsave(plot=combo1, filename = "spls-da_embeddings.png", dpi=500, height=5,width=18)
+all_results$timepoint <- factor(all_results$timepoint, levels = c("-72h", "0h", "6h", "24h", "48h", "72h"))
+anim_plot <- ggplot(all_results, aes(x = comp1, y = comp2, colour=treatment))+geom_point(size = 5)+
+  labs(title = "Timepoint: {current_frame}") +
+   ggforce::geom_mark_ellipse(aes(group = treatment), size = 2)+
+  theme_bw()+#stat_ellipse()+
+  scale_colour_manual(values=c("mediumseagreen","darkorchid2"))+transition_manual(timepoint)
+anim <- animate(anim_plot, nframes=12, fps=1, renderer = gifski_renderer(), width=600, height=500, res=100)
+anim
+anim_save("splsda_animation.gif", animation = anim)
 ```
 
 ## run sPLS-DA on each cluster individually
@@ -176,10 +182,8 @@ print(all_results)
 ## plot results by celltype
 ```{r}
 all_results$timepoint <- factor(all_results$timepoint, levels = c("-72h", "0h", "6h", "24h", "48h", "72h"))
-anim_plot <- ggplot(all_results, aes(x = comp1, y = comp2, colour=treatment))+geom_point()+
+ggplot(all_results, aes(x = comp1, y = comp2, colour=treatment))+geom_point()+
   facet_grid(~cluster)+theme_bw()+#stat_ellipse()+
-  scale_colour_manual(values=c("mediumseagreen","darkorchid2"))+transition_states(timepoint, transition_length = 2, state_length = 1)
-animate(anim_plot)
-anim_save("splsda_animation.gif", animation = last_animation())
+  scale_colour_manual(values=c("mediumseagreen","darkorchid2"))
 
 ```
