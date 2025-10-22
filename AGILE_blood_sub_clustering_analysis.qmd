@@ -495,7 +495,6 @@ emm_all_extended <- bind_rows(
     time_new = factor(time_new, levels = c("-72h", "0h", "6h", "24h", "48h", "72h"))
   )
 
-
 plot1 <- ggplot(emm_all_extended, aes(x = time_new, y = emmean, colour = treatment, group = treatment)) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50")+
   geom_line(position = position_dodge(width=0.4)) +
@@ -528,6 +527,157 @@ plot1
 ggsave(plot=plot1,filename="relative_change_proportions.png", dpi = 500,
 height = 8, width = 12, bg="white")
 ```
+
+## change in absolute counts
+### instead of doing proportions, i will take the total number of cells (50uL of cell suspension was recorded for all samples, so we can compare them) and assess change
+```{r}
+neut.data$time_new <- factor(neut.data$time, levels = c("-72h", "0h", "4h", "6h", "24h", "48h", "72h"),
+labels = c("-72h", "0h", "6h", "6h", "24h", "48h", "72h"))
+# Step 1: Get valid donor × timepoint × treatment combos
+valid_combos <- neut.data %>%
+  distinct(donor, time_new, treatment)
+
+# Step 2: Get all cluster labels
+all_labels <- unique(neut.data$labels)
+
+# Step 3: Create full valid combinations with all labels
+complete_combos <- expand_grid(
+  valid_combos,
+  labels = all_labels
+)
+
+# Step 4: Count observed cells per group
+observed_counts <- neut.data %>%
+  count(labels, donor, time_new, treatment, name = "n")
+
+# Step 5: Left join observed counts to full combo grid
+counts <- complete_combos %>%
+  left_join(observed_counts, by = c("labels", "donor", "time_new", "treatment")) %>%
+  mutate(n = replace_na(n, 0))
+clusters <- unique(counts$labels)
+```
+
+```{r}
+analyse_cluster <- function(cluster_name) {
+  dat_clust <- counts %>% filter(labels == cluster_name)
+  
+  model <- tryCatch({
+    glmer(
+      n ~ treatment * time_new + (1 | donor),
+      data = dat_clust, family = poisson
+    )
+  }, error = function(e) {
+    message(paste("Model failed for cluster", cluster_name))
+    return(NULL)
+  })
+  
+  if (is.null(model)) return(NULL)
+  
+  emm <- emmeans(model, ~ treatment | time_new, type = "response")
+  contrasts <- contrast(emm, method = "pairwise")
+  list(
+    cluster = cluster_name,
+    model_summary = summary(model),
+    emmeans = emm,
+    contrasts = contrasts
+  )
+}
+```
+
+## run the model and get the results
+```{r}
+results_list <- lapply(clusters, analyse_cluster)
+names(results_list) <- clusters
+
+# Filter out clusters where model failed (if any)
+results_list <- results_list[!sapply(results_list, is.null)]
+
+# Example: access contrasts for the first cluster
+print(results_list[[1]]$contrasts)
+```
+
+## here we access the results list, pulling out the emmeans and contrasts with a function
+## then combine into usable dataframes
+```{r}
+# Function to get EMMs + contrasts with p-values for plotting
+extract_emm_and_contrasts <- function(cluster_name, results_list) {
+  emm_df <- as.data.frame(results_list[[cluster_name]]$emmeans)
+  contrasts_df <- as.data.frame(results_list[[cluster_name]]$contrasts)
+  
+  # Add cluster ID to both
+  emm_df$cluster_id <- cluster_name
+  contrasts_df$cluster_id <- cluster_name
+  
+  list(emm = emm_df, contrast = contrasts_df)
+}
+
+# Apply to all clusters
+emm_contrast_list <- lapply(names(results_list), extract_emm_and_contrasts, results_list = results_list)
+
+# Combine into data frames
+emm_all <- bind_rows(lapply(emm_contrast_list, `[[`, "emm"))
+contrast_all <- bind_rows(lapply(emm_contrast_list, `[[`, "contrast"))
+```
+
+## add a column specifying if a result was significant so that we can use these in the plot
+## add a value that is above the upper confidence interval by a little bit so that the asterisks will sit above them on the plot
+## join these columns back in witht he contrasts_all df
+```{r}
+# Extract timepoint and treatment comparison from contrast row names
+contrast_all <- contrast_all %>%
+  mutate(
+    sig_label = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+max_prob <- emm_all %>%
+  group_by(cluster_id) %>%
+  summarise(max_y = max(asymp.UCL, na.rm = TRUE)) %>%
+  mutate(label_y = max_y +0.05)
+
+contrast_all <- contrast_all %>%
+  left_join(max_prob, by = "cluster_id")
+```
+
+## add some rows that give baseline (-72h) some 0 values just for plotting
+## plot the results and save
+```{r}
+plot1 <- ggplot(emm_all, aes(x = time_new, y = rate, colour = treatment, group = treatment))+
+  geom_line(position = position_dodge(width=0.4)) +
+  geom_point(position = position_dodge(width=0.4)) +
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), width = 0.2,
+  position = position_dodge(width=0.4)) +
+  geom_text(
+    data = contrast_all %>% filter(sig_label != ""),
+    aes(x = time_new, y = label_y, label = sig_label),
+    inherit.aes = FALSE,
+    size = 7
+  ) +
+  facet_wrap(~cluster_id, scales = "free_y") +
+  labs(
+    title = "Log2 fold change of cluster proportions over time",
+    y = "Log2FC",
+    x = "Timepoint",
+    colour = "Treatment"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+scale_colour_manual(values=c("mediumseagreen", "darkorchid2"))+ 
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15)))+
+  theme(axis.text = element_text(size = 12, colour = "black"),
+  strip.text = element_text(size = 12, colour = "black", face = "bold"),
+  axis.title = element_text(size = 14, colour = "black"))+ 
+    theme(legend.text = element_text(size = 14),legend.title = element_text(size = 15))+
+  guides(colour = guide_legend(override.aes = list(size = 5)))
+plot1
+#change name of plot if neuts are excluded
+ggsave(plot=plot1,filename="absolute_counts.png", dpi = 500,
+height = 8, width = 12, bg="white")
+```
+
 
 ## assessing marker expression over time
 ### i will save the mixed model for specific markers/custers, otherwise its just too many to run and is fishing too strongly
