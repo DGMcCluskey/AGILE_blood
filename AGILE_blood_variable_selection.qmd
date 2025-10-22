@@ -10,6 +10,7 @@ library(dplyr)
 library(tidyr)
 library(patchwork)
 library(ggplotify)
+library(gganimate)
 ```
 
 
@@ -25,11 +26,11 @@ exp_by_donor <- exp_by_donor %>% group_by(donor,time_new,treatment,marker) %>% s
 ```
 
 ```{r}
-# Load mixOmics
-library(mixOmics)
-
 loading_plots <- list()
 embedding_plots <- list()
+top_markers_by_time <- list()
+
+timepoints <- unique(exp_by_donor$time_new)
 
 for (tp in timepoints) {
   cat("Processing timepoint:", tp, "\n")
@@ -100,100 +101,85 @@ ggsave(plot=combo1, filename = "spls-da_embeddings.png", dpi=500, height=5,width
 
 ## run sPLS-DA on each cluster individually
 ```{r}
-exp_by_donor <- blood_df %>% pivot_longer(names_to="marker", values_to="expression", cols=c(1:31))
-exp_by_donor <- exp_by_donor %>% group_by(donor,time_new,treatment,marker,labels) %>% summarise(median = median(expression), .groups="drop")
+exp_by_donor <- blood_df %>%
+  pivot_longer(names_to = "marker", values_to = "expression", cols = c(1:31)) %>%
+  group_by(donor, time_new, treatment, marker, labels) %>%
+  summarise(median = median(expression), .groups = "drop")
 
-# 1. Get all timepoints
 timepoints <- unique(exp_by_donor$time_new)
 
-# 2. Initialize output lists
-top_markers_by_tp_clust <- list()
-loading_plots <- list()
-embedding_plots <- list()
+# Initialize an empty dataframe to hold all results
+all_results <- data.frame()
 
-# 3. Loop through each timepoint
 for (tp in timepoints) {
   cat("Processing timepoint:", tp, "\n")
   
-  # Get clusters present in this timepoint
   clusters_in_tp <- unique(exp_by_donor$labels[exp_by_donor$time_new == tp])
   
-  # Loop through clusters within this timepoint
   for (clust in clusters_in_tp) {
     cat("  Processing cluster:", clust, "\n")
     
-    # Filter for current timepoint and cluster
     marker_data <- exp_by_donor %>%
       filter(time_new == tp, labels == clust) %>%
-      dplyr::select(donor, treatment, marker, median) %>%
-      pivot_wider(names_from = marker, values_from = median)
+      select(donor, treatment, marker, median) %>%
+      pivot_wider(names_from = marker, values_from = median) %>%
+      drop_na()
     
-    # Remove rows with NA (incomplete donor data)
-    marker_data <- marker_data %>% drop_na()
-    
-    # Check there are at least 2 treatment groups
     if (length(unique(marker_data$treatment)) < 2) {
       warning(paste("  Skipping cluster", clust, "at", tp, "- only one treatment group"))
       next
     }
     
-    # Prepare X and Y
-    X <- marker_data %>% dplyr::select(-donor, -treatment) %>% as.matrix()
+    X <- marker_data %>% select(-donor, -treatment) %>% as.matrix()
     Y <- factor(marker_data$treatment)
     
-    # Set number of top markers to keep
     keepX <- 10
     
-    # Run sPLS-DA
-    splsda_res <- splsda(X, Y, ncomp = 2,keepX = keepX)
+    splsda_res <- splsda(X, Y, ncomp = 2, keepX = keepX)
     
-    # Extract top markers
+    # Get top markers from comp 1
     top_vars <- selectVar(splsda_res, comp = 1)$name
     
-    # Use a compound key for the list (e.g., "TP1_Cluster5")
-    key <- paste(tp, clust, sep = "_")
-    top_markers_by_tp_clust[[key]] <- top_vars
+    # Extract sample coordinates on components 1 and 2
+    coords <- splsda_res$variates$X[, 1:2]
     
-    # Plot embeddings and loadings
-    p_embed <- plotIndiv(splsda_res, comp = c(1,2), group = Y, legend = TRUE,
-                         title = paste("sPLS-DA: Time", tp, "| Cluster", clust),
-                         ellipse = TRUE, star = FALSE, cex = 2.5, pch = 16,
-                         col=c("mediumseagreen", "darkorchid2"), style="ggplot2")
+    # Build dataframe with embedding info
+    emb_df <- data.frame(coords) %>%
+      mutate(donor = marker_data$donor,
+             treatment = marker_data$treatment,
+             timepoint = tp,
+             cluster = clust)
     
-    plot_obj <- plotLoadings(splsda_res, comp = 1,
-                             method = "mean", contrib = "max",
-                             title = paste("Top markers: Time", tp, "| Cluster", clust),
-                             legend.color = c("mediumseagreen", "darkorchid2"),
-                             size.name = 2)
+    # Build dataframe for top markers
+    top_markers_df <- data.frame(
+      timepoint = tp,
+      cluster = clust,
+      marker = top_vars,
+      stringsAsFactors = FALSE
+    )
     
-    # Save plots
-    embedding_plots[[key]] <- p_embed
-    loading_plots[[key]] <- plot_obj
+    # Combine results
+    # Here we keep embedding and top markers in separate dataframes but can store both
+    # For example, bind top markers info to a cumulative dataframe:
+    all_results <- bind_rows(all_results, emb_df)
+    
+    # Save plots as needed in a separate list (or save ggplot objects somewhere)
+    # embedding_plots[[paste(tp, clust, sep = "_")]] <- plotIndiv(...)
+    # loading_plots[[paste(tp, clust, sep = "_")]] <- plotLoadings(...)
   }
 }
 
-# 4. Combine top markers into a dataframe
-top_markers_df <- stack(top_markers_by_tp_clust) %>%
-  rename(marker = values, tp_cluster = ind) %>%
-  tidyr::separate(tp_cluster, into = c("timepoint", "cluster"), sep = "_")
+print(all_results)
 
-print(top_markers_df)
 ```
 
 ## plot results by celltype
 ```{r}
-plots <- lapply(embedding_plots, function(x) x$graph)
-treg <- plots$`-72h_Treg`+plots$`0h_Treg`+plots$`6h_Treg`+plots$`24h_Treg`+plots$`48h_Treg`+plots$`72h_Treg`
-treg
-b <- plots$`-72h_B`+plots$`0h_B`+plots$`6h_B`+plots$`24h_B`+plots$`48h_B`+plots$`72h_B`
-b
-nk <- plots$`-72h_NK`+plots$`0h_NK`+plots$`6h_NK`+plots$`24h_NK`+plots$`48h_NK`+plots$`72h_NK`
-nk
-cd4t <- plots$`-72h_CD4+T`+plots$`0h_CD4+T`+plots$`6h_CD4+T`+plots$`24h_CD4+T`+plots$`48h_CD4+T`+plots$`72h_CD4+T`
-cd4t
-dc <- plots$`-72h_DC`+plots$`0h_DC`+plots$`6h_DC`+plots$`24h_DC`+plots$`48h_DC`+plots$`72h_DC`
-dc
-classical_mono <- plots$`72h_Classical_mono`+plots$`0h_Classical_mono`+plots$`6h_Classical_mono`+plots$`24h_Classical_mono`+plots$`48h_Classical_mono`+plots$`72h_Classical_mono`
-classical_mono
+all_results$timepoint <- factor(all_results$timepoint, levels = c("-72h", "0h", "6h", "24h", "48h", "72h"))
+anim_plot <- ggplot(all_results, aes(x = comp1, y = comp2, colour=treatment))+geom_point()+
+  facet_grid(~cluster)+theme_bw()+#stat_ellipse()+
+  scale_colour_manual(values=c("mediumseagreen","darkorchid2"))+transition_states(timepoint, transition_length = 2, state_length = 1)
+animate(anim_plot)
+anim_save("splsda_animation.gif", animation = last_animation())
 
 ```
