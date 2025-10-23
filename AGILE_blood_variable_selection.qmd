@@ -97,6 +97,7 @@ for (tp in timepoints) {
 all_results$timepoint <- factor(all_results$timepoint, levels = c("-72h", "0h", "6h", "24h", "48h", "72h"))
 anim_plot <- ggplot(all_results, aes(x = comp1, y = comp2, colour=treatment))+geom_point(size = 5)+
   labs(title = "Timepoint: {current_frame}") +
+  ylim(-6,6)+xlim(-7,7)+
    ggforce::geom_mark_ellipse(aes(group = treatment), size = 2)+
   theme_bw()+#stat_ellipse()+
   scale_colour_manual(values=c("mediumseagreen","darkorchid2"))+transition_manual(timepoint)
