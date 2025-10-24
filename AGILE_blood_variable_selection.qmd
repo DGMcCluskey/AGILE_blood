@@ -175,9 +175,7 @@ for (tp in timepoints) {
     # loading_plots[[paste(tp, clust, sep = "_")]] <- plotLoadings(...)
   }
 }
-
 print(all_results)
-
 ```
 
 ## plot results by celltype
